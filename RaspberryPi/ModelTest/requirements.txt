@@ -1,0 +1,19 @@
+# YOLO26 ONNX profile. Install inference-models separately with --no-deps.
+onnxruntime==1.22.1
+supervision==0.30.0
+pydantic>=2.11.7,<3
+rich>=14.1,<15
+backoff~=2.2.0
+python-dotenv>=1.2.2,<2
+pybase64~=1.0
+pycocotools>=2.0.10,<2.1
+tldextract~=5.1.2
+safetensors>=0.6.2,<1
+requests>=2.33,<3
+filelock>=3.20.3,<4
+packaging>=24
+scikit-image>=0.24
+onnx>=1.21
+einops>=0.7
+shapely>=2
+pyclipper>=1.3

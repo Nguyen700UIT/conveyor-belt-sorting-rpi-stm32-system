@@ -1,0 +1,58 @@
+.uv-cache/
+RaspberryPi/DataCollector/.venv/
+RaspberryPi/DataCollector/.live/
+RaspberryPi/DataCollector/dataset/
+__pycache__/
+RaspberryPi/ModelTest/.env
+
+# Local tools, editor settings, and credentials
+.codex/
+.vscode/
+.env
+.env.*
+!.env.example
+CMakeUserPresets.json
+*.pem
+*.key
+
+# Python environments and caches
+.venv/
+venv/
+.deps/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Firmware build products and IDE caches
+build/
+build-local/
+cmake-build-*/
+.cache/
+compile_commands.json
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.obj
+*.su
+
+# Captured data, inference downloads, and runtime output
+.live/
+.tmp/
+.roboflow/
+.inference/
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
