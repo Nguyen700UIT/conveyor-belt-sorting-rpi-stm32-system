@@ -3,8 +3,11 @@
 
 #include "stm32f1xx_hal.h"
 
+#define SERVO_1_PWM_CHANNEL TIM_CHANNEL_1
+#define SERVO_2_PWM_CHANNEL TIM_CHANNEL_2
 #define MIN_COUNTS 1000U
 #define MAX_COUNTS 2000U
+
 
 /* Requires a 1 MHz timer counter and a 20 ms PWM period.
  * angle: 0..180 degrees; 90 is the middle position (1500 us).

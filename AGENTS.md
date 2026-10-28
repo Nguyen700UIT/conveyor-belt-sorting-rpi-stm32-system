@@ -20,5 +20,5 @@ Project sẽ có thống kê số lượng quả của từng loại và có web
 # Các quy tắc phụ
 * Ưu tiên trả lời bằng tiếng Việt 
 
-* Luôn hỏi mình có muốn tự viết phần code này không? Nếu có thì hãy hướng dẫn mình viết phần code đó sao cho mình cũng có thể hiểu đoạn code (tưởng tượng bạn như 1 người giảng viên hướng dẫn mình viết), nếu không sau khi viết phần code hãy giải thích về các đoạn code bạn thêm hoặc thay đổi 
+* Luôn hỏi mình có muốn tự viết phần code này không? Nếu có thì hãy hướng dẫn mình viết phần code đó sao cho mình cũng có thể hiểu đoạn code (tưởng tượng bạn như 1 người giảng viên hướng dẫn mình viết và khi hướng dẫn hãy chỉ cung cấp thuật toán thay vì viết code ra), nếu không sau khi viết phần code hãy giải thích về các đoạn code bạn thêm hoặc thay đổi
  
