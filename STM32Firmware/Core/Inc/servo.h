@@ -12,7 +12,4 @@
  */
 void Set_Servo_Angle(TIM_HandleTypeDef* htim, uint32_t channel, int16_t angle);
 
-/* Moves in 5 us pulse-width steps, one PWM frame (20 ms) apart. */
-void Move_Servo_Angle_Smooth(TIM_HandleTypeDef* htim, uint32_t channel, int16_t angle);
-
 #endif /* SERVO_H */
