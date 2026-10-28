@@ -2,7 +2,7 @@
 
 Project băng chuyền phân loại tắc sống, tắc chín và tắc hư bằng Raspberry Pi 5
 và STM32F103C8T6. Pi xử lý camera; STM32 phụ trách giao tiếp UART và điều khiển
-phần cứng. Hệ thống hướng tới xử lý bằng sự kiện, hạn chế polling.
+phần cứng. Hệ thống hướng tới xử lý bằng sự kiện
 
 ## Cấu trúc
 
@@ -37,13 +37,5 @@ Chức năng thu ảnh và thử model hiện tách riêng; tích hợp UART, c�
 
 Pi kết nối UART qua USB CP2102; firmware dùng USART1 ở 115200 baud, 8N1.
 
-## Dữ liệu và cấu hình cục bộ
 
-Không commit `.env`, API key, môi trường Python, cache, firmware đã build,
-dataset hoặc trọng số mô hình. Với ModelTest, sao chép `.env.example` thành
-`.env` và điền API key trên máy chạy. Lưu dataset và mô hình bên ngoài Git;
-ghi lại phiên bản và cách tải trong tài liệu khi cần chia sẻ.
 
-Repository lưu source, cấu hình build, tài liệu, dependency manifests và các
-test hiện có. Không coi một commit là xác nhận hệ thống đã được kiểm thử trên
-phần cứng.
