@@ -48,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/product_queue.c
     Core/Src/uart_link.c
     Core/Src/servo.c
+    Core/Src/motor.c
 )
 
 # Add include paths

@@ -1,4 +1,4 @@
-#include "product.queue.h" 
+#include "product_queue.h" 
 #include <stddef.h>
 
 static ProductType items_queue[QUEUE_CAP];
@@ -24,8 +24,8 @@ bool ProductQueue_Pop(ProductType *product)
 {
     if (product == NULL || count == 0U) return false;
 
-    *product = items[head];
-    head = uint8_t((head + 1U) % QUEUE_CAP);
+    *product = items_queue[head];
+    head = (uint8_t)((head + 1U) % QUEUE_CAP);
     count--;
     
     return true;
