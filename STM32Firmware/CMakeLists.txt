@@ -49,6 +49,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/uart_link.c
     Core/Src/servo.c
     Core/Src/motor.c
+    Core/Src/system_fsm.c
+    Core/Src/servo_fsm.c
 )
 
 # Add include paths

@@ -4,6 +4,9 @@ RaspberryPi/DataCollector/.live/
 RaspberryPi/DataCollector/dataset/
 __pycache__/
 RaspberryPi/ModelTest/.env
+/STM32Firmware/tests
+docs/
+
 
 # Local tools, editor settings, and credentials
 .codex/

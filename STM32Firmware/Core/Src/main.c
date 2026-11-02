@@ -23,10 +23,10 @@
 /* USER CODE BEGIN Includes */
 #include "uart_link.h"
 #include "servo.h"
+#include "servo_fsm.h"
+#include "system_fsm.h"
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_tim.h"
-#include "uart_link.h"
-#include "product_queue.h"
 #include "motor.h"
 /* USER CODE END Includes */
 
@@ -49,10 +49,30 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+static ServoFsm servo_fsms[2];
+static const ServoFsmConfig servo_configs[2] = {
+  { .rest_angle = 0, .deflect_angle = 45,
+    .deflect_ms = 200U, .hold_ms = 2000U, .return_ms = 200U },
+  { .rest_angle = 0, .deflect_angle = 45,
+    .deflect_ms = 200U, .hold_ms = 2000U, .return_ms = 200U }
+};
+static volatile uint8_t servo_timer_due;
+
+/* Debugger mailbox: write product ID first, then command.
+ * Commands: 1 = servo 1, 2 = servo 2, 3 = Stop both, 4 = Reset.
+ * Results: 0 = none, 1 = accepted, 2 = rejected.
+ * This bench test never starts the conveyor motor.
+ */
+volatile uint32_t servo_test_command;
+volatile uint32_t servo_test_product_id;
+volatile uint32_t servo_test_result;
+volatile uint32_t servo_completed_count[2];
+volatile uint32_t servo_last_completed_id[2];
 
 /* USER CODE END PV */
 
@@ -62,12 +82,176 @@ static void MX_GPIO_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
+static void ServoTest_Init(void);
+static void ServoTest_ApplyOutput(uint32_t index, const ServoFsmOutput *output);
+static void ServoTest_ScheduleTimer(void);
+static void ServoTest_ProcessCommand(void);
+static void ServoTest_ProcessTimeouts(void);
+static bool ServoTest_BothIdle(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static bool ServoTest_BothIdle(void)
+{
+  return servo_fsms[0].state == SERVO_FSM_IDLE
+      && servo_fsms[1].state == SERVO_FSM_IDLE;
+}
+
+static void ServoTest_ApplyOutput(uint32_t index, const ServoFsmOutput *output)
+{
+  if (output->angle_requested)
+  {
+    const uint32_t channel = index == 0U ? TIM_CHANNEL_1 : TIM_CHANNEL_2;
+    Set_Servo_Angle(&htim2, channel, output->angle);
+  }
+  if (output->cycle_completed)
+  {
+    servo_last_completed_id[index] = output->product_id;
+    servo_completed_count[index]++;
+  }
+}
+
+static void ServoTest_Init(void)
+{
+  ServoFsmOutput outputs[2];
+  const uint32_t now = HAL_GetTick();
+  for (uint32_t index = 0U; index < 2U; index++)
+  {
+    if (!ServoFsm_Init(&servo_fsms[index], &servo_configs[index], now, &outputs[index]))
+    {
+      Error_Handler();
+    }
+  }
+  for (uint32_t index = 0U; index < 2U; index++)
+  {
+    ServoTest_ApplyOutput(index, &outputs[index]);
+  }
+  if (HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1) != HAL_OK
+      || HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  ServoTest_ScheduleTimer();
+}
+
+static void ServoTest_ScheduleTimer(void)
+{
+  HAL_TIM_Base_Stop_IT(&htim4);
+  __HAL_TIM_CLEAR_FLAG(&htim4, TIM_FLAG_UPDATE);
+  HAL_NVIC_ClearPendingIRQ(TIM4_IRQn);
+  servo_timer_due = 0U;
+
+  const uint32_t now = HAL_GetTick();
+  uint32_t next_ms = UINT32_MAX;
+  for (uint32_t index = 0U; index < 2U; index++)
+  {
+    if (servo_fsms[index].state == SERVO_FSM_UNINITIALIZED
+        || servo_fsms[index].state == SERVO_FSM_IDLE)
+    {
+      continue;
+    }
+    const uint32_t remaining_ms = servo_fsms[index].deadline_ms - now; //Overflow when deadline passed
+    if (remaining_ms == 0U || remaining_ms > INT32_MAX)
+    {
+      servo_timer_due = 1U;
+      return;
+    }
+    if (remaining_ms < next_ms)
+    {
+      next_ms = remaining_ms;
+    }
+  }
+  if (next_ms == UINT32_MAX)
+  {
+    return;
+  }
+  /* TIM4 is 16-bit, running at 2 kHz. Long deadlines use bounded chunks. */
+  if (next_ms > 32767U)
+  {
+    next_ms = 32767U;
+  }
+  __HAL_TIM_SET_AUTORELOAD(&htim4, next_ms * 2U - 1U);
+  __HAL_TIM_SET_COUNTER(&htim4, 0U);
+  if (HAL_TIM_Base_Start_IT(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+static void ServoTest_ProcessCommand(void)
+{
+  const uint32_t command = servo_test_command;
+  const uint32_t product_id = servo_test_product_id;
+  servo_test_command = 0U;
+  if (command == 0U)
+  {
+    return;
+  }
+
+  ServoFsmOutput output;
+  const uint32_t now = HAL_GetTick();
+  bool accepted = false;
+  if (command == 3U)
+  {
+    /* Stop is processed before timeout completion in the main loop. */
+    Motor_Stop(&htim3);
+    accepted = SystemFsm_HandleEvent(SYSTEM_EVENT_STOP);
+    for (uint32_t index = 0U; index < 2U; index++)
+    {
+      ServoFsm_Stop(&servo_fsms[index], now, &output);
+      ServoTest_ApplyOutput(index, &output);
+    }
+  }
+  else if (command == 4U)
+  {
+    if (ServoTest_BothIdle())
+    {
+      accepted = SystemFsm_HandleEvent(SYSTEM_EVENT_RESET_ALLOWED);
+    }
+  }
+  else if (command == 1U || command == 2U)
+  {
+    if (SystemFsm_GetState() == SYSTEM_READY)
+    {
+      SystemFsm_HandleEvent(SYSTEM_EVENT_START);
+    }
+    if (SystemFsm_GetState() == SYSTEM_RUNNING)
+    {
+      const uint32_t index = command - 1U;
+      accepted = ServoFsm_Start(&servo_fsms[index], product_id, now, &output);
+      ServoTest_ApplyOutput(index, &output);
+    }
+  }
+  servo_test_result = accepted ? 1U : 2U;
+  ServoTest_ScheduleTimer();
+}
+
+static void ServoTest_ProcessTimeouts(void)
+{
+  if (servo_timer_due == 0U)
+  {
+    return;
+  }
+  servo_timer_due = 0U;
+  const uint32_t now = HAL_GetTick();
+  ServoFsmOutput output;
+  for (uint32_t index = 0U; index < 2U; index++)
+  {
+    if (ServoFsm_HandleTimeout(&servo_fsms[index], now, &output))
+    {
+      ServoTest_ApplyOutput(index, &output);
+    }
+  }
+  if (SystemFsm_GetState() == SYSTEM_INIT && ServoTest_BothIdle())
+  {
+    SystemFsm_HandleEvent(SYSTEM_EVENT_INIT_DONE);
+  }
+  ServoTest_ScheduleTimer();
+}
 
 /* USER CODE END 0 */
 
@@ -103,12 +287,10 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_TIM3_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
   Motor_Stop(&htim3);
+  ServoTest_Init();
 
   if (UartLink_Init(&huart1) != HAL_OK)
   {
@@ -120,6 +302,20 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    ServoTest_ProcessCommand();
+    ServoTest_ProcessTimeouts();
+
+    /* A pending IRQ wakes WFI even while PRIMASK is set. Masking the final
+     * check and sleep prevents losing a deadline between them.
+     * SysTick stays enabled for HAL time and debugger mailbox wakeups.
+     */
+    __disable_irq();
+    if (servo_timer_due == 0U && servo_test_command == 0U)
+    {
+      __DSB();
+      __WFI();
+    }
+    __enable_irq();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -326,6 +522,49 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 36000-1;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 2-1;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -358,6 +597,15 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM4)
+  {
+    /* Stop after one update; the main loop schedules the next deadline. */
+    HAL_TIM_Base_Stop_IT(htim);
+    servo_timer_due = 1U;
+  }
+}
 
 /* USER CODE END 4 */
 
@@ -368,6 +616,11 @@ static void MX_GPIO_Init(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+  if (htim3.Instance == TIM3)
+  {
+    Motor_Stop(&htim3);
+  }
+  SystemFsm_HandleEvent(SYSTEM_EVENT_ERROR);
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
