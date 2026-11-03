@@ -47,7 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/product_queue.c
     Core/Src/uart_link.c
-      Core/Src/uart_protocol.c
+    Core/Src/uart_protocol.c
     Core/Src/servo.c
     Core/Src/motor.c
     Core/Src/system_fsm.c
