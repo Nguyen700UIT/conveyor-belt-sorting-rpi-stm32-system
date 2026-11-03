@@ -162,7 +162,7 @@ static void ServoTest_ScheduleTimer(void)
     }
     if (remaining_ms < next_ms)
     {
-      next_ms = remaining_ms;
+      next_ms = remaining_ms; //Set remaining_ms as next for the timer to continue counting the remaining miliseconds
     }
   }
   if (next_ms == UINT32_MAX)
