@@ -4,9 +4,9 @@
 #include "stm32f1xx_hal.h"
 
 HAL_StatusTypeDef UartLink_Init(UART_HandleTypeDef *huart);
-HAL_StatusTypeDef UartLink_SendText(const char* text);
+HAL_StatusTypeDef UartLink_Send(const uint8_t *data, uint16_t length);
+uint16_t UartLink_Read(uint8_t *data, uint16_t max_length);
+uint8_t UartLink_RxOverflowed(void);
 HAL_StatusTypeDef UartLink_Service(void);
-uint8_t UartLink_HasWork(void);
-uint8_t UartLink_TakeByte(uint8_t *value);
 
 #endif /* UART_LINK_H */
