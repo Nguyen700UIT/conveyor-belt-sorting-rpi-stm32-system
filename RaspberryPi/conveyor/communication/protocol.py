@@ -88,7 +88,7 @@ def decode_response(frame):
 
 
 class UartProtocol:
-    """Protocol layer over RaspberryPi/UartLink/uart_link.py's byte API."""
+    """Protocol layer over conveyor.communication.serial_link's byte API."""
 
     def __init__(
         self,

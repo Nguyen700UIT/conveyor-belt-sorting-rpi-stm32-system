@@ -17,7 +17,7 @@ Hướng thiết kế là xử lý theo sự kiện, hạn chế polling. UART, 
 
 - `RaspberryPi/ModelTest/`: thử nghiệm camera và model; là nơi có thể tích hợp gửi lệnh khi hoàn thiện luồng inference. README hiện mô tả phần thử model chưa tích hợp đầy đủ với STM32.
 - `RaspberryPi/DataCollector/`: thu thập ảnh và kiểm tra chất lượng dữ liệu; không phải luồng điều khiển băng tải.
-- `RaspberryPi/UartLink/`: lớp byte serial phía Pi và README. `uart_link.py` mở cổng, gửi byte và đọc tối đa số byte yêu cầu; chưa diễn giải frame hoặc ACK/NACK.
+- `RaspberryPi/conveyor/`: package vận hành Pi, hiện có transport serial, protocol và lệnh PING; xem `RaspberryPi/README.md` cho lộ trình camera, tracking, sender và thống kê.
 - `STM32Firmware/Core/Inc`, `STM32Firmware/Core/Src`: header và mã ứng dụng STM32.
 - `STM32Firmware/Drivers/`: HAL/CMSIS của ST.
 - `STM32Firmware/STM32Firmware.ioc`: cấu hình CubeMX của vi điều khiển và ngoại vi.
@@ -122,7 +122,7 @@ Trạng thái SEQ được ghi nhận trước khi gửi ACK. Vì vậy, nếu A
 
 ### 3.3 UART phía Pi
 
-#### 3.3.1 `RaspberryPi/UartLink/uart_link.py`
+#### 3.3.1 `RaspberryPi/conveyor/communication/serial_link.py`
 
 `UartLink` cung cấp byte I/O bằng thư viện `pyserial`; không tạo hoặc phân tích frame.
 
@@ -144,7 +144,7 @@ Trạng thái SEQ được ghi nhận trước khi gửi ACK. Vì vậy, nếu A
 - `receive(max_length=1, timeout=None)`: báo `PortNotOpenError` nếu cổng chưa mở; báo `ValueError` nếu `max_length <= 0` hoặc timeout âm; nếu hợp lệ thì đọc tối đa số byte yêu cầu. Khi truyền `timeout`, hàm tạm đặt read timeout của serial theo giá trị đó rồi khôi phục timeout cấu hình ban đầu; timeout bằng 0 trả ngay `b""`. Hết timeout chỉ kết thúc lần đọc, không đóng kết nối serial.
 - `__enter__()` / `__exit__(...)`: cho phép dùng context manager `with`; khi vào thì mở cổng, khi thoát thì đóng cổng.
 
-#### 3.3.2 `RaspberryPi/UartLink/protocol.py`
+#### 3.3.2 `RaspberryPi/conveyor/communication/protocol.py`
 
 File này xây dựng frame và quản lý giao dịch trên `UartLink`. Nó chưa quyết định loại quả cần phân loại hoặc điều khiển FSM.
 

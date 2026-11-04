@@ -55,6 +55,12 @@ compile_commands.json
 *.tflite
 *.log
 
+# Conveyor runtime configuration and output
+/RaspberryPi/config.toml
+/RaspberryPi/runtime/
+/RaspberryPi/*.sqlite3
+/RaspberryPi/*.sqlite3-*
+
 # OS files
 .DS_Store
 Thumbs.db

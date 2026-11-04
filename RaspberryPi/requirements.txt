@@ -1,0 +1,2 @@
+# Runtime UART dependencies. Vision dependencies remain in ModelTest until integration.
+pyserial>=3.5,<4
