@@ -25,6 +25,8 @@
 #include "servo.h"
 #include "servo_fsm.h"
 #include "system_fsm.h"
+#include "uart_protocol.h"
+#include "product_queue.h"
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_tim.h"
 #include "motor.h"
@@ -54,6 +56,11 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+/* Main-loop use only. Advance only after a product is successfully queued. */
+static uint32_t next_product_id = 1U;
+/* Last protocol service result, observable in the debugger. HAL_BUSY is retryable. */
+static volatile HAL_StatusTypeDef uart_protocol_status = HAL_OK;
+
 static ServoFsm servo_fsms[2];
 static const ServoFsmConfig servo_configs[2] = {
   { .rest_angle = 0, .deflect_angle = 45,
@@ -64,7 +71,8 @@ static const ServoFsmConfig servo_configs[2] = {
 static volatile uint8_t servo_timer_due;
 
 /* Debugger mailbox: write product ID first, then command.
- * Commands: 1 = servo 1, 2 = servo 2, 3 = Stop both, 4 = Reset.
+ * Commands: 1 = servo 1, 2 = servo 2, 3 = Stop both,
+ * 4 = Reset (operator must first clear the belt), 5 = Start without a servo test.
  * Results: 0 = none, 1 = accepted, 2 = rejected.
  * This bench test never starts the conveyor motor.
  */
@@ -73,6 +81,8 @@ volatile uint32_t servo_test_product_id;
 volatile uint32_t servo_test_result;
 volatile uint32_t servo_completed_count[2];
 volatile uint32_t servo_last_completed_id[2];
+/* Timing estimate only; no physical exit confirmation. */
+volatile uint32_t ripe_estimated_exit_count;
 
 /* USER CODE END PV */
 
@@ -84,6 +94,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
+static UartProtocol_Status_t App_HandleProductCommand(uint8_t command);
 static void ServoTest_Init(void);
 static void ServoTest_ApplyOutput(uint32_t index, const ServoFsmOutput *output);
 static void ServoTest_ScheduleTimer(void);
@@ -95,6 +106,50 @@ static bool ServoTest_BothIdle(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+//Callback
+static UartProtocol_Status_t App_HandleProductCommand(uint8_t command)
+{
+  if (SystemFsm_GetState() != SYSTEM_RUNNING) return UART_PROTOCOL_STATUS_NOT_READY;
+  const uint32_t now = HAL_GetTick();
+  Product p;
+
+  /* Temporary travel times for bench testing; measure before running the belt. */
+  switch(command)
+  {
+    case UART_PROTOCOL_CMD_UNRIPE:
+    {
+      p.type = PRODUCT_UNRIPE;
+      p.deadline_ms = now + (1000U - 200U);
+      break;
+    }
+    case UART_PROTOCOL_CMD_RIPE:
+    {
+      p.type = PRODUCT_RIPE;
+      p.deadline_ms = now + 5000U;
+      break;
+    }
+    case UART_PROTOCOL_CMD_SPOILED:
+    {
+      p.type = PRODUCT_SPOILED;
+      p.deadline_ms = now + (2000U - 200U);
+      break;
+    }
+    default:
+      return UART_PROTOCOL_STATUS_BAD_CMD;
+  }
+  p.product_id = next_product_id;
+
+  if(ProductQueue_Push(p))
+  {
+    next_product_id++;
+    ServoTest_ScheduleTimer();
+    return UART_PROTOCOL_STATUS_ACK;
+  }
+  return UART_PROTOCOL_STATUS_FULL;
+}
+
+
 static bool ServoTest_BothIdle(void)
 {
   return servo_fsms[0].state == SERVO_FSM_IDLE
@@ -154,17 +209,36 @@ static void ServoTest_ScheduleTimer(void)
     {
       continue;
     }
+
     const uint32_t remaining_ms = servo_fsms[index].deadline_ms - now; //Overflow when deadline passed
     if (remaining_ms == 0U || remaining_ms > INT32_MAX)
     {
       servo_timer_due = 1U;
       return;
     }
+
     if (remaining_ms < next_ms)
     {
       next_ms = remaining_ms; //Set remaining_ms as next for the timer to continue counting the remaining miliseconds
     }
   }
+
+  if (SystemFsm_GetState() == SYSTEM_RUNNING)
+  {
+    Product p;
+    if (ProductQueue_PeekEarliest(&p))
+    {
+      const uint32_t remaining_ms = p.deadline_ms - now;
+      if (remaining_ms == 0 || remaining_ms > INT32_MAX)
+      {
+        servo_timer_due = 1U;
+        return;
+      }
+      if (remaining_ms < next_ms) next_ms = remaining_ms;
+    }
+  }
+
+
   if (next_ms == UINT32_MAX)
   {
     return;
@@ -208,10 +282,21 @@ static void ServoTest_ProcessCommand(void)
   }
   else if (command == 4U)
   {
-    if (ServoTest_BothIdle())
+    if (ServoTest_BothIdle()
+        && (SystemFsm_GetState() == SYSTEM_STOPPED
+            || SystemFsm_GetState() == SYSTEM_FAULT))
     {
+      /* Explicit operator reset confirms the belt has been physically cleared. */
+      Product discarded;
+      while (ProductQueue_Pop(&discarded))
+      {
+      }
       accepted = SystemFsm_HandleEvent(SYSTEM_EVENT_RESET_ALLOWED);
     }
+  }
+  else if (command == 5U)
+  {
+    accepted = SystemFsm_HandleEvent(SYSTEM_EVENT_START);
   }
   else if (command == 1U || command == 2U)
   {
@@ -246,6 +331,46 @@ static void ServoTest_ProcessTimeouts(void)
       ServoTest_ApplyOutput(index, &output);
     }
   }
+
+  while (SystemFsm_GetState() == SYSTEM_RUNNING)
+  {
+    Product p;
+    if (!ProductQueue_PeekEarliest(&p))
+    {
+      break;
+    }
+    const uint32_t product_now = HAL_GetTick();
+    const uint32_t remaining_ms = p.deadline_ms - product_now;
+    if (remaining_ms != 0U && remaining_ms <= INT32_MAX)
+    {
+      break;
+    }
+    if (p.type == PRODUCT_RIPE)
+    {
+      ProductQueue_PopEarliest(&p);
+      ripe_estimated_exit_count++;
+      continue;
+    }
+    /* Bench mapping: servo 1 = unripe, servo 2 = spoiled. */
+    const uint32_t index = p.type == PRODUCT_UNRIPE ? 0U : 1U;
+    if ((p.type == PRODUCT_UNRIPE || p.type == PRODUCT_SPOILED)
+        && ServoFsm_Start(&servo_fsms[index], p.product_id, product_now, &output))
+    {
+      ServoTest_ApplyOutput(index, &output);
+      ProductQueue_PopEarliest(&p);
+      continue;
+    }
+
+    /* A busy servo cannot safely sort this product late. Keep its record. */
+    Motor_Stop(&htim3);
+    SystemFsm_HandleEvent(SYSTEM_EVENT_ERROR);
+    for (uint32_t servo = 0U; servo < 2U; servo++)
+    {
+      ServoFsm_Stop(&servo_fsms[servo], product_now, &output);
+      ServoTest_ApplyOutput(servo, &output);
+    }
+  }
+
   if (SystemFsm_GetState() == SYSTEM_INIT && ServoTest_BothIdle())
   {
     SystemFsm_HandleEvent(SYSTEM_EVENT_INIT_DONE);
@@ -296,6 +421,7 @@ int main(void)
   {
     Error_Handler();
   }
+  UartProtocol_Init(App_HandleProductCommand);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -303,6 +429,7 @@ int main(void)
   while (1)
   {
     ServoTest_ProcessCommand();
+    uart_protocol_status = UartProtocol_Process();
     ServoTest_ProcessTimeouts();
 
     /* A pending IRQ wakes WFI even while PRIMASK is set. Masking the final
@@ -310,7 +437,8 @@ int main(void)
      * SysTick stays enabled for HAL time and debugger mailbox wakeups.
      */
     __disable_irq();
-    if (servo_timer_due == 0U && servo_test_command == 0U)
+    if (servo_timer_due == 0U && servo_test_command == 0U
+        && !UartLink_HasServices())
     {
       __DSB();
       __WFI();

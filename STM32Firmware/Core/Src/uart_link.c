@@ -18,6 +18,16 @@ static volatile uint8_t tx_count;
 static volatile uint8_t tx_active;
 static volatile uint8_t tx_recovery_needed;
 
+bool UartLink_HasServices(void)
+{
+    return rx_head != rx_tail
+        || rx_overflow != 0U
+        || rx_recovery_needed != 0U
+        || (tx_recovery_needed != 0U && tx_count != 0U);
+}
+
+
+
 static HAL_StatusTypeDef UartLink_StartTransmit(void)
 {
     HAL_StatusTypeDef status;
