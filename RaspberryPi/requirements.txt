@@ -1,2 +1,2 @@
-# Runtime UART dependencies. Vision dependencies remain in ModelTest until integration.
+# UART-only dependencies. Install requirements-vision.txt for the local .pt detector.
 pyserial>=3.5,<4

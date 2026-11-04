@@ -1,7 +1,8 @@
 # Pipeline Raspberry Pi
 
 Package `conveyor` dành cho chương trình vận hành. Hiện đã có transport UART,
-protocol và lệnh PING. Camera, tracking, sender và thống kê là các bước bạn sẽ
+protocol, lệnh PING và detector Ultralytics dùng trọng số cục bộ.
+Camera, tracking, sender và thống kê là các bước bạn sẽ
 tự viết tiếp; chưa có chương trình phân loại toàn pipeline hoặc dashboard.
 `DataCollector/` và `ModelTest/` tiếp tục chạy riêng theo README của từng công cụ.
 
@@ -14,6 +15,7 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m conveyor --help
 .venv/bin/python -m conveyor --ping --port /dev/ttyUSB0
+.venv/bin/python -m conveyor --ping --config config.toml
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -22,12 +24,90 @@ công là `STM32 PONG`; lỗi kết nối/timeout trả exit code 1. Chạy khô
 chỉ hiện trợ giúp. Firmware hiện điều khiển Start/Stop/Reset qua debugger.
 PONG không chứng minh hệ thống đang RUNNING.
 
-`requirements.txt` hiện chỉ chứa pyserial. Chưa cài thêm bộ inference vào package;
-khi bắt đầu viết detector, dùng hướng dẫn ONNX/Picamera2 trong `ModelTest/README.md`.
-`config.example.toml` mô tả cấu hình dự kiến, CLI hiện nhận cổng qua `--port`.
-Sau này sao chép thành `config.toml` khi viết loader. Đường dẫn output dùng thư mục
+`requirements.txt` chỉ chứa pyserial để kiểm tra UART. Detector dùng bộ phụ thuộc
+riêng `requirements-vision.txt`; không dùng môi trường Roboflow của ModelTest.
+Sao chép `config.example.toml` thành `config.toml` và truyền `--config config.toml`.
+Loader kiểm tra `serial`, `camera` (width/height/fps nguyên dương) và `detector`
+(model là đường dẫn `.pt`, imgsz nguyên dương, confidence hữu hạn trong khoảng mở 0..1). Các bảng còn lại
+dành cho bước tiếp theo. Khi dùng `--config`, cần cả ba bảng kể cả lúc PING.
+Nếu truyền thêm `--port`, cổng CLI ưu tiên hơn cổng trong file. Chỉ dùng `--port`
+thì các tham số UART còn lại lấy mặc định của transport/protocol. Đường dẫn tương đối
+tới file cấu hình tính từ thư mục đang chạy lệnh. Riêng đường dẫn model tương đối
+tính từ thư mục chứa TOML, được loader chuyển thành tuyệt đối.
+Cấu hình sai trả lỗi trước khi mở cổng; PING không cần file trọng số tồn tại.
+Đường dẫn output dự kiến dùng thư mục
 `runtime/`. Cấu hình cá nhân, output và SQLite không được commit.
-`ROBOFLOW_API_KEY` lấy từ biến môi trường, không đặt trong TOML.
+Package vận hành không cần API key Roboflow. ModelTest cũ vẫn dùng cấu hình riêng.
+
+## Model Ultralytics cục bộ
+
+Chép file detection đã train vào `RaspberryPi/models/best.pt` (Git bỏ qua `.pt`).
+Trong `RaspberryPi/config.toml`, đặt `model = "models/best.pt"`; nếu file cấu hình
+ở `RaspberryPi/conveyor/config.toml`, đặt `model = "../models/best.pt"`.
+Không dùng URL hoặc model ID để thay thế trọng số. Detector kiểm tra file tồn tại
+trước khi gọi Ultralytics, không tự chọn/tải model khi thiếu file.
+
+```toml
+[detector]
+model = "models/best.pt"
+confidence = 0.4
+imgsz = 640
+```
+
+Trên Pi, cài `ultralytics` đúng phiên bản của môi trường train trước, rồi cài
+`requirements-vision.txt` bằng pip trong venv. Ghi phiên bản thực tế và khóa nó
+trong môi trường triển khai sau khi thử model trên Pi. Chưa chốt phiên bản vì
+repo chưa có trọng số hoặc thông tin môi trường train. NumPy/PyTorch là phụ thuộc
+của Ultralytics. Picamera2 sẽ dùng từ Raspberry Pi OS khi triển khai camera.
+
+`Detector(model_path, confidence=0.4, imgsz=640)` tải model một lần. Nó yêu cầu
+task `detect` và đúng ba nhãn `green`, `riped`, `damaged`, lấy tên từ metadata,
+không mặc định ID 0/1/2. File hỏng hoặc sai task/nhãn gây lỗi lúc khởi tạo.
+
+`predict(frame, color_order="BGR")` nhận NumPy uint8 H×W×3 và trả danh sách
+`Detection(xyxy, class_id, label, confidence)`. `xyxy` theo pixel ảnh gốc.
+Phải truyền rõ `color_order="RGB"` hoặc `"BGR"` dựa trên dữ liệu thật; RGB được
+đổi sang BGR trước predict. Không suy luận thứ tự màu chỉ từ tên format Picamera2.
+Mỗi lần gọi predict dùng CPU, imgsz/confidence đã cấu hình, không lưu ảnh tự động.
+Không có detection thì trả danh sách rỗng. PING không import vision/Ultralytics.
+
+Để thử riêng trên Pi sau khi cài phụ thuộc, từ `RaspberryPi`:
+
+```python
+import cv2
+from conveyor.config import load_config
+from conveyor.vision.detector import Detector
+
+config = load_config("conveyor/config.toml")
+settings = config["detector"]
+detector = Detector(settings["model"], settings["confidence"], settings["imgsz"])
+frame = cv2.imread("test-fruit.jpg")
+if frame is None:
+    raise ValueError("Cannot read test-fruit.jpg")
+detections = detector.predict(frame, color_order="BGR")
+for detection in detections:
+    print(detection)
+```
+
+Thử ảnh một quả, nhiều quả, không quả; đo thời gian tải model riêng với thời gian
+predict sau warmup. Chưa xác nhận FPS hoặc độ chính xác trên phần cứng.
+Chạy test sau khi cài vision để kiểm tra RGB/BGR bằng NumPy thật; thiếu NumPy,
+hai test ảnh được skip nhưng các test đường dẫn/task/nhãn vẫn chạy bằng model giả.
+
+### Thử cả thư mục ảnh trên Windows
+
+Từ `RaspberryPi`, dùng Python trong virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m conveyor.vision.annotate_images --config conveyor/config.toml --source images --output runtime/predictions/my_test
+```
+
+Output phải là thư mục mới, nằm ngoài thư mục ảnh đầu vào. Chương trình dùng
+detector của pipeline, lưu bản sao có box/nhãn/confidence và `report.json` chứa
+từng detection, thời gian suy luận và tổng số box mỗi lớp. Ảnh gốc không bị sửa.
+Số detection không phải độ chính xác: cần nhãn ground truth để đánh giá accuracy/mAP.
+Với bộ trọng số hiện có, môi trường Windows được thử bằng Ultralytics `8.4.194`
+và PyTorch CPU. Kết quả máy tính không đại diện tốc độ Pi.
 
 ## Cấu trúc hiện có và nơi thêm code
 
@@ -37,16 +117,25 @@ RaspberryPi/
 │   ├── __init__.py
 │   ├── __main__.py           # điểm chạy python -m conveyor
 │   ├── app.py                # hiện chỉ điều phối kiểm tra UART
+│   ├── config.py             # kiểm tra cấu hình serial, camera, detector
+│   ├── events.py             # Detection dùng chung
+│   ├── vision/
+│   │   ├── __init__.py
+│   │   └── detector.py       # Ultralytics .pt trên CPU
 │   └── communication/
 │       ├── __init__.py
 │       ├── serial_link.py    # UartLink: byte I/O
 │       └── protocol.py       # frame, CRC, ACK, retry, SEQ
 ├── tests/
 │   ├── test_app.py
+│   ├── test_config.py
+│   ├── test_detector.py
 │   ├── test_protocol.py
 │   └── test_serial_link.py
 ├── config.example.toml
 ├── requirements.txt
+├── requirements-vision.txt
+├── models/README.md
 ├── README.md
 ├── DataCollector/
 └── ModelTest/
@@ -56,16 +145,14 @@ Không tạo file rỗng cho chức năng chưa viết. Khi đến bước tươ
 
 | Module | Trách nhiệm |
 |---|---|
-| `conveyor/config.py` | Đọc/kiểm tra TOML, thông báo cấu hình sai trước khi mở thiết bị |
-| `conveyor/events.py` | Kiểu dữ liệu detection, track và sự kiện vượt vạch |
+| `conveyor/events.py` (mở rộng) | Thêm kiểu dữ liệu track và sự kiện vượt vạch |
 | `conveyor/vision/camera.py` | Ảnh và thời gian chụp monotonic |
-| `conveyor/vision/detector.py` | Tải model một lần, trả box/nhãn/confidence |
 | `conveyor/vision/tracker.py` | Duy trì ID qua các frame |
 | `conveyor/vision/crossing.py` | Phát một sự kiện/ID khi vượt vạch đúng chiều |
 | `conveyor/communication/sender.py` | Một luồng gửi tuần tự, chờ queue có giới hạn |
 | `conveyor/statistics/store.py` | SQLite: sự kiện, thời gian thực và kết quả ACK/lỗi |
 
-Thêm `__init__.py` vào `vision/` và `statistics/` khi tạo các package đó.
+Thêm `__init__.py` vào `statistics/` khi bắt đầu viết lưu trữ.
 `app.py` sẽ nối camera → detector → tracker → crossing → queue → sender → STM32;
 thống kê được gọi từ tầng điều phối, không ghép vào transport/protocol.
 
@@ -107,7 +194,7 @@ không tồn tại qua reset; cần quy trình khôi phục riêng trước khi 
 ## Lộ trình tự viết
 
 1. Chạy kiểm tra UART và PING. Dùng fake transport trong test, không cần cắm Pi.
-2. Viết `config.py`, `events.py`, rồi camera/detector. Inference hoạt động khi
+2. Thử detector với trọng số thật, rồi viết camera và mở rộng `events.py`. Inference hoạt động khi
    pipeline chạy, không phụ thuộc người mở trang xem như script ModelTest.
 3. Viết tracker và crossing. Ánh xạ nhãn model `green` → UNRIPE,
    `riped` → RIPE, `damaged` → SPOILED. Nhãn lạ phải báo lỗi trước khi gửi lệnh.

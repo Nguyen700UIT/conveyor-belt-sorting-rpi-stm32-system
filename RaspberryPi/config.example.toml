@@ -1,6 +1,6 @@
-# Design reference for the future config.py loader; the current CLI does not read TOML.
-# Copy to config.toml when implementing the loader. Never place API keys here.
-# ROBOFLOW_API_KEY must come from the process environment.
+# config.py validates serial, camera and detector settings; pass this file with --config.
+# Copy to config.toml for local settings. Never place API keys here.
+# Local model paths are resolved relative to this TOML file. No API key is needed.
 
 [camera]
 width = 1280
@@ -8,8 +8,9 @@ height = 720
 fps = 10
 
 [detector]
-model = "tung-tran-s-workspace/ce224-project-1-yolo26n-t1"
+model = "models/best.pt"
 confidence = 0.4
+imgsz = 640
 
 [crossing]
 # Normalized position (0..1). Calibrate to the real camera view.
