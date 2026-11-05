@@ -83,7 +83,7 @@ class CrossingDetector:
             if x2 <= x1 or y2 <= y1:
                 raise ValueError("Bounding box must have positive width and height")
             if self.axis == "x":
-                position = (x1 / 2 + x2 / 2) / frame_width
+                position = (x1 / 2 + x2 / 2) / frame_width #Normalized to [0,1] range
             else:
                 position = (y1 / 2 + y2 / 2) / frame_height
             positions.append(position)

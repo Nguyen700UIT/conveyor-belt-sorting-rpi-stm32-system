@@ -45,7 +45,7 @@ static uint8_t UartProtocol_Crc8(const uint8_t *data, uint8_t length)
 static uint8_t UartProtocol_IsCommandValid(uint8_t command)
 {
     return (uint8_t)(command >= UART_PROTOCOL_CMD_PING &&
-                     command <= UART_PROTOCOL_CMD_SPOILED);
+                     command <= UART_PROTOCOL_CMD_START);
 }
 
 static HAL_StatusTypeDef UartProtocol_SendResponse(uint8_t sequence,

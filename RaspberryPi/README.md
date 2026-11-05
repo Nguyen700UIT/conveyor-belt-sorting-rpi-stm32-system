@@ -1,9 +1,8 @@
 # Pipeline Raspberry Pi
 
-Package `conveyor` dành cho chương trình vận hành. Hiện đã có transport UART,
-protocol, lệnh PING và detector Ultralytics dùng trọng số cục bộ.
-Camera, tracking, sender và thống kê là các bước bạn sẽ
-tự viết tiếp; chưa có chương trình phân loại toàn pipeline hoặc dashboard.
+Package `conveyor` có pipeline Picamera2 → detector → tracker → crossing → sender
+→ STM32. Detector Ultralytics dùng trọng số cục bộ. Thống kê và dashboard chưa
+triển khai; pipeline cần kiểm chứng trên phần cứng và hiệu chỉnh thời gian gạt.
 `DataCollector/` và `ModelTest/` tiếp tục chạy riêng theo README của từng công cụ.
 
 ## Cài đặt và chạy phần hiện có
@@ -23,6 +22,64 @@ PING chỉ kiểm tra đường truyền, không Start motor hoặc gạt servo.
 công là `STM32 PONG`; lỗi kết nối/timeout trả exit code 1. Chạy không có tham số
 chỉ hiện trợ giúp. Firmware hiện điều khiển Start/Stop/Reset qua debugger.
 PONG không chứng minh hệ thống đang RUNNING.
+
+Sau khi nạp firmware có lệnh START, có thể chuyển READY → RUNNING bằng:
+
+```sh
+.venv/bin/python -m conveyor --start --config conveyor/config.toml
+```
+
+START (`CMD=5`) trả ACK khi chuyển thành công hoặc đã RUNNING; trả NOT_READY
+nếu đang INIT/STOPPED/FAULT. START chuyển FSM sang RUNNING và bật motor chiều
+LPWM với duty thử 30%; không tự reset lỗi hoặc xóa hàng đợi. STOP/RESET vẫn dùng debugger. Không dùng
+`--ping` và `--start` cùng lúc.
+
+## Chạy pipeline Picamera2 và STM32 thật
+
+Trên Raspberry Pi OS, dùng môi trường có quyền truy cập Picamera2 từ hệ thống:
+
+```sh
+sudo apt install python3-picamera2 python3-venv
+# Chỉ tạo venv khi chưa có; venv cần được tạo với --system-site-packages.
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -r requirements-vision.txt
+.venv/bin/python -m conveyor --run --config conveyor/config.toml
+```
+
+Nạp firmware mới hỗ trợ START và motor trước khi thử. Chép trọng số vào
+`models/best.pt`, kiểm tra cổng serial và các bảng camera/detector/crossing/sender
+trong TOML. Có thể dùng `--port /dev/ttyUSB0` để ghi đè cổng. Các chế độ
+`--run`, `--ping`, `--start` loại trừ nhau; `--run` tự gửi PING rồi START,
+không cần chạy `--start` riêng.
+
+Chương trình tải model một lần, mở camera và warmup trên ảnh thật trước START.
+`vision/camera.py` quản lý Picamera2 qua `Camera.start()`, `read()` và `close()`;
+`app.py` nhận `(frame, timestamp)` từ `read()` rồi truyền frame vào detector.
+Picamera2 dùng RGB888 (mảng BGR), timestamp lấy từ metadata SensorTimestamp của
+cùng ảnh. Camera chờ ảnh mới; sender ngủ khi queue rỗng. Không cần trình duyệt
+hoặc màn hình. Terminal hiện số track, thời gian inference, CROSS và ACK/lỗi.
+ACK nghĩa là STM32 đã nhận, không xác nhận gạt thành công.
+
+Vạch quyết định dùng tâm box và cấu hình chuẩn hóa: `axis="x"`, `position=0.5`,
+`direction="increasing"` là đi từ trái sang phải qua giữa ảnh. Quả cần được
+nhìn thấy trước vạch. Có thể thêm bảng tùy chọn sau vào cấu hình cá nhân:
+
+```toml
+[tracker]
+max_distance_px = 80.0
+max_age_seconds = 0.5
+```
+
+Nếu khoảng cách giữa các frame suy luận quá lớn, cần hiệu chỉnh tracker theo
+tốc độ băng tải; ID đổi có thể gây bỏ sót/đếm trùng. Thời gian firmware hiện
+tính từ lúc nhận lệnh, chưa bù độ trễ camera/inference/UART; cần đo và chỉnh
+trước khi đánh giá vị trí gạt.
+
+Ctrl+C dừng pipeline và đóng camera/UART; giao dịch đang chạy được hoàn thành,
+sự kiện còn chờ được in NOT SENT. Lỗi camera, hàng đợi đầy hoặc lỗi UART dừng
+nhận quả mới. **Motor không tự dừng khi Pi thoát hoặc lỗi:** dùng debugger STM32
+`servo_test_command=3` để Stop. Sau kết quả UART không rõ, không chạy lại để gửi
+bù sản phẩm; cần dừng, dọn băng tải và khôi phục trạng thái/phiên UART trước.
 
 `requirements.txt` chỉ chứa pyserial để kiểm tra UART. Detector dùng bộ phụ thuộc
 riêng `requirements-vision.txt`; không dùng môi trường Roboflow của ModelTest.
@@ -177,7 +234,7 @@ Transport không giải mã giao thức.
 | STM32 → Pi | `0x5A, SEQ, STATUS, CRC8` |
 
 CRC-8/ATM: poly `0x07`, init `0`, không reflect, xorout `0`; tính trên ba byte đầu.
-CMD: PING `1`, UNRIPE `2`, RIPE `3`, SPOILED `4`.
+CMD: PING `1`, UNRIPE `2`, RIPE `3`, SPOILED `4`, START `5`.
 STATUS: PONG `0`, ACK `1`, FULL `2`, NOT_READY `3`, BAD_CMD `4`.
 
 `exchange(command)` giữ tối đa một giao dịch đang chờ. Retry cùng SEQ/CMD;

@@ -8,20 +8,98 @@ Dự án hướng tới phân loại tắc sống, tắc chín và tắc hư b�
 
 - **Raspberry Pi:** nhận hình ảnh, chạy YOLO và quyết định loại quả.
 - **UART qua USB-UART CP2102:** chuyển byte giữa Pi và STM32. Hai đầu cần cùng cấu hình; firmware hiện đặt USART1 ở 115200 baud, 8N1.
-- **STM32:** xử lý theo FSM, nhận tín hiệu cảm biến và điều khiển servo/motor.
-- **Dashboard:** hiển thị thống kê sản lượng theo ngày; nơi lưu và cách triển khai web chưa được nhóm chốt.
+- **STM32:** nhận lệnh, lập lịch bằng deadline, điều khiển hai servo MG90S và motor JGB37 qua BTS7960. Cảm biến E3F-DS30C4 dự kiến bổ sung sau; hiện chưa tham gia quyết định gạt.
+- **Thống kê/dashboard:** dự kiến SQLite và giao diện sản lượng theo ngày; hiện chưa triển khai `store.py` hoặc web server trong package vận hành.
 
-Hướng thiết kế là xử lý theo sự kiện, hạn chế polling. UART, servo, motor và hàng đợi nên có ranh giới rõ; `main.c`/FSM điều phối chúng thay vì để từng mô-đun biết toàn bộ hệ thống.PROJECT_ARCHITECTURE. md 
+Hướng thiết kế là xử lý theo sự kiện, hạn chế polling. Pi chờ frame camera và sender chờ Condition; STM32 dùng ngắt UART, timer deadline và WFI khi không còn việc. `app.py` và `main.c` điều phối, các mô-đun xử lý trách nhiệm riêng.
 
 ## 2. Bố cục thư mục
 
-- `RaspberryPi/ModelTest/`: thử nghiệm camera và model; là nơi có thể tích hợp gửi lệnh khi hoàn thiện luồng inference. README hiện mô tả phần thử model chưa tích hợp đầy đủ với STM32.
+- `RaspberryPi/ModelTest/`: công cụ thử Roboflow cũ, chạy riêng; không phải pipeline vận hành.
 - `RaspberryPi/DataCollector/`: thu thập ảnh và kiểm tra chất lượng dữ liệu; không phải luồng điều khiển băng tải.
-- `RaspberryPi/conveyor/`: package vận hành Pi, hiện có transport serial, protocol và lệnh PING; xem `RaspberryPi/README.md` cho lộ trình camera, tracking, sender và thống kê.
+- `RaspberryPi/conveyor/`: package vận hành Pi, có camera, detector, tracker, crossing, sender và CLI PING/START/RUN.
+- `RaspberryPi/tests/`: kiểm thử cấu hình, UART, detector, camera và tích hợp app bằng phần cứng giả.
+- `RaspberryPi/models/`: chứa trọng số `best.pt` cục bộ, ngoài Git.
+- `RaspberryPi/runtime/`: kết quả chạy sinh ra, ngoài Git. `conveyor/config.toml` là cấu hình cá nhân, cũng ngoài Git; mẫu dùng chung ở `config.example.toml`.
 - `STM32Firmware/Core/Inc`, `STM32Firmware/Core/Src`: header và mã ứng dụng STM32.
 - `STM32Firmware/Drivers/`: HAL/CMSIS của ST.
 - `STM32Firmware/STM32Firmware.ioc`: cấu hình CubeMX của vi điều khiển và ngoại vi.
 - `STM32Firmware/cmake/`, `CMakeLists.txt`, `CMakePresets.json`: cấu hình biên dịch.
+
+### 2.1 Luồng vận hành tổng thể
+
+```mermaid
+flowchart LR
+    Camera[Picamera2] --> Detector[YOLO CPU]
+    Detector --> Tracker[Tracker: ID qua các frame]
+    Tracker --> Crossing[Crossing: tâm quả vượt vạch]
+    Crossing --> Queue[Hàng đợi gửi có giới hạn]
+    Queue --> Sender[Một luồng Sender]
+    Sender --> Protocol[UartProtocol: frame và retry]
+    Protocol --> UART[CP2102 / USART1]
+    UART --> Parser[STM32 uart_protocol]
+    Parser --> App[main.c: callback]
+    App --> Products[ProductQueue: deadline]
+    Products --> Timer[TIM4: deadline sớm nhất]
+    Timer --> Servo[Servo FSM / TIM2]
+    App --> State[System FSM]
+    State --> Motor[BTS7960 / TIM3]
+```
+
+Response quay về cùng liên kết UART. Pi chỉ biết lệnh đã được STM32 chấp nhận qua ACK; chưa có phản hồi xác nhận quả thực sự vào đúng hộp.
+
+### 2.2 Trách nhiệm các mô-đun Pi
+
+| File trong `RaspberryPi/conveyor/` | Trách nhiệm/API chính |
+|---|---|
+| `__main__.py`, `app.py` | Điểm chạy `python -m conveyor`; đọc CLI/cấu hình, nối thành phần, quản lý khởi động và đóng tài nguyên. |
+| `config.py` | `load_config()` đọc TOML, kiểm tra serial/camera/detector, đổi đường dẫn model tương đối thành tuyệt đối theo thư mục TOML. Chưa kiểm tra file trọng số tồn tại. |
+| `events.py` | Các dataclass bất biến `Detection`, `TrackedDetection`, `CrossingEvent`. |
+| `vision/camera.py` | `Camera.start()/read()/close()` quản lý Picamera2; trả `(frame BGR, timestamp cảm biến tính bằng giây)`. |
+| `vision/detector.py` | `Detector` tải `.pt` một lần; `predict()` chạy CPU, trả box trên ảnh gốc, tên lớp và confidence. |
+| `vision/tracker.py` | `Tracker.update()` ghép tâm box gần nhất một-một; cấp ID tăng dần cho detection chưa ghép được. |
+| `vision/crossing.py` | `CrossingDetector.update()` phát tối đa một sự kiện/ID khi tâm vượt vạch đúng chiều. |
+| `communication/sender.py` | `Sender.start()/submit()/stop()` quản lý hàng đợi và một worker, gọi callback kết quả UART. |
+| `vision/annotate_images.py` | Công cụ thử model trên thư mục ảnh, xuất ảnh có box và báo cáo; không điều khiển băng tải. |
+
+Camera được cấu hình RGB888, tương ứng mảng BGR; `read()` sao chép ảnh trước khi release request. Timestamp lấy từ `SensorTimestamp` của cùng request, đổi nanosecond sang giây. Đây là đồng hồ tăng đơn điệu từ lúc khởi động, không phải ngày giờ thực. Cấu hình tay hiện đặt trong `camera.py`: `AfMode=0`, `LensPosition=10.0`, `AeEnable=False`, `ExposureTime=2000 µs`, `AnalogueGain=2.0`; width/height/fps lấy từ TOML.
+
+Detector yêu cầu file `.pt` tồn tại, task `detect` và đúng ba nhãn `green/riped/damaged`; lấy ánh xạ class ID từ metadata, không giả định thứ tự lớp. Lỗi tải trọng số được báo thay vì chọn model thay thế. PING/START riêng không import hoặc tải thư viện vision.
+
+Tracker không dùng nhãn để ghép, nên đổi nhãn vẫn giữ ID. Mặc định thử: `max_distance_px=80.0`, `max_age_seconds=0.5`; cấu hình bảng `[tracker]` có thể ghi đè. ID hết hạn không được tái sử dụng trong cùng instance. Quả sát nhau, che khuất hoặc inference chậm có thể gây đổi ID; thuật toán tham lam không bảo đảm ghép tối ưu toàn cục.
+
+Crossing dùng tọa độ chuẩn hóa theo ảnh camera gốc, không theo `imgsz` của model. Với quả đi từ dưới lên, dùng cấu hình sau (file mẫu dùng chung vẫn minh họa trục x):
+
+```toml
+[crossing]
+axis = "y"
+position = 0.5
+direction = "decreasing"
+```
+
+Ảnh cao 640 pixel thì vạch ở y=320. Quả phải được quan sát trước vạch; xuất hiện lần đầu phía sau vạch chưa được tính. Sự kiện lưu nhãn/confidence của frame xác nhận vượt vạch. Trạng thái chống phát lại được giữ đến hết lần chạy, bộ nhớ tăng theo số ID; không chống trùng được nếu tracker cấp nhầm ID mới cho cùng quả.
+
+Sender ánh xạ `green → UNRIPE`, `riped → RIPE`, `damaged → SPOILED`. `queue_capacity=16` chỉ tính phần đang chờ, ngoài một giao dịch đang gửi. Worker ngủ bằng Condition khi rỗng, chỉ gọi `exchange()` một lần cho mỗi sự kiện; retry thuộc protocol. Callback `on_result(event, response, error)` chạy trong worker, hiện in kết quả ra terminal. Queue đầy, FULL/NOT_READY hết lượt thử, lỗi giao dịch hoặc callback làm sender chặn nhận mới; các sự kiện chưa gửi được giữ trong `pending_events`.
+
+### 2.3 Khởi động, chạy và dừng Pi
+
+Từ thư mục `RaspberryPi`, với venv có Picamera2 và các dependency vision:
+
+```sh
+.venv/bin/python -m conveyor --run --config conveyor/config.toml
+```
+
+`--ping`, `--start`, `--run` loại trừ nhau. `--run` thực hiện:
+
+1. Đọc cấu hình, khởi tạo crossing/tracker và tải detector.
+2. Mở UART, gửi PING và yêu cầu PONG.
+3. Khởi tạo sender, mở camera và warmup model trên frame thật; kết quả warmup không gửi UART.
+4. Gửi START, yêu cầu ACK, rồi khởi chạy worker gửi.
+5. Chờ frame → predict → tracker → crossing → submit; in số track, thời gian inference, CROSS và ACK/lỗi.
+
+Camera và inference chạy độc lập với người xem web. Ctrl+C trả exit code 130; lỗi pipeline trả 1. Khi thoát, app chờ giao dịch đang thực hiện, in các sự kiện NOT SENT, đóng camera rồi đóng UART. Lỗi sender được kiểm tra giữa các bước xử lý frame; chưa có cơ chế ngắt capture/inference đang chạy ngay lập tức.
+
+**Dừng chương trình Pi không tự dừng motor STM32.** Giao thức chưa có STOP hoặc heartbeat; dùng debugger `servo_test_command=3`. Sau giao dịch không rõ kết quả, không tạo protocol mới để gửi bù; phải dừng và khôi phục hệ thống/phiên UART có kiểm soát.
 
 ## 3. UART
 
@@ -39,7 +117,7 @@ STM32 → Pi: [SOF_RESP, SEQ, STATUS, CRC8]
 | `SOF_REQ` | `0xA5`, byte bắt đầu request từ Pi. |
 | `SOF_RESP` | `0x5A`, byte bắt đầu response từ STM32. |
 | `SEQ` | Số thứ tự 8 bit, từ `0x00` đến `0xFF`; tăng modulo 256 sau ACK/PONG. Khi gửi lại cùng giao dịch, giữ nguyên SEQ và CMD. |
-| `CMD` | `0x01` PING; `0x02` UNRIPE; `0x03` RIPE; `0x04` SPOILED. |
+| `CMD` | `0x01` PING; `0x02` UNRIPE; `0x03` RIPE; `0x04` SPOILED; `0x05` START. |
 | `STATUS` | `0x00` PONG; `0x01` ACK; `0x02` FULL; `0x03` NOT_READY; `0x04` BAD_CMD. |
 | `CRC8` | CRC-8/ATM tính trên ba byte đầu của frame tương ứng: SOF, SEQ và CMD hoặc STATUS. |
 
@@ -103,7 +181,7 @@ Luồng nhận: HAL nhận một byte vào `rx_byte` → callback chép byte và
 - `UART_PROTOCOL_FRAME_SIZE`: độ dài frame, 4 byte.
 - `UART_PROTOCOL_CRC_POLYNOMIAL`: polynomial CRC-8/ATM, `0x07`.
 - `UART_PROTOCOL_READ_CHUNK_SIZE`: số byte tối đa mỗi lần lấy từ RX buffer, 16.
-- `UartProtocol_Command_t`: `PING=0x01`, `UNRIPE=0x02`, `RIPE=0x03`, `SPOILED=0x04`.
+- `UartProtocol_Command_t`: `PING=0x01`, `UNRIPE=0x02`, `RIPE=0x03`, `SPOILED=0x04`, `START=0x05`.
 - `UartProtocol_Status_t`: `PONG=0x00`, `ACK=0x01`, `FULL=0x02`, `NOT_READY=0x03`, `BAD_CMD=0x04`, đồng nhất với bảng ở mục 3.1.
 - `request_frame[4]`: các byte request đang được ghép; `request_length` là số byte hiện có.
 - `command_handler`: callback do ứng dụng đăng ký để quyết định lệnh phân loại mới được chấp nhận hay trả `FULL`/`NOT_READY`.
@@ -153,7 +231,7 @@ File này xây dựng frame và quản lý giao dịch trên `UartLink`. Nó ch�
 - `SOF_REQUEST = 0xA5`, `SOF_RESPONSE = 0x5A`: byte bắt đầu frame theo từng chiều.
 - `FRAME_SIZE = 4`: số byte trong mỗi frame.
 - `CRC_POLYNOMIAL = 0x07`: polynomial dùng cho CRC-8/ATM.
-- `Command`: `PING=0x01`, `UNRIPE=0x02`, `RIPE=0x03`, `SPOILED=0x04`.
+- `Command`: `PING=0x01`, `UNRIPE=0x02`, `RIPE=0x03`, `SPOILED=0x04`, `START=0x05`.
 - `Status`: `PONG=0x00`, `ACK=0x01`, `FULL=0x02`, `NOT_READY=0x03`, `BAD_CMD=0x04`.
 - `Response(sequence, status)`: đối tượng bất biến chứa SEQ và STATUS đã giải mã.
 - `ProtocolError`: lớp lỗi cơ sở. `TransportError` báo lỗi đọc/ghi serial; `TransactionTimeout` báo không có response hợp lệ sau các lần gửi; `UncertainTransaction` báo giao dịch trước chưa rõ kết quả và chặn gửi lệnh mới.
@@ -185,33 +263,89 @@ File này xây dựng frame và quản lý giao dịch trên `UartLink`. Nó ch�
 
 ### 3.4 Hạn chế và phần chưa triển khai
 
-- `uart_protocol.c/.h` đã có parser và API nhưng chưa được khởi tạo/gọi trong `main.c`; ứng dụng cần gọi `UartProtocol_Init()` và `UartProtocol_Process()`.
-- Callback nhận lệnh phân loại cần được nối với FSM/hàng đợi sau khi giao diện FSM được thống nhất/hoàn thiện. Callback phải trả ACK chỉ sau khi lệnh được chấp nhận; trả FULL/NOT_READY nếu chưa chấp nhận.
+- `main.c` đã gọi `UartLink_Init()`, `UartProtocol_Init(App_HandleProductCommand)` và xử lý `UartProtocol_Process()` trong vòng chính. Callback nhận sản phẩm chỉ khi RUNNING và ACK sau khi thêm được vào ProductQueue.
+- START được callback xử lý trước điều kiện RUNNING: READY → RUNNING và bật motor LPWM ở duty 30%; đã RUNNING thì ACK, INIT/STOPPED/FAULT thì NOT_READY. START không xóa lỗi hoặc hàng đợi. Retry bản đã ACK được parser trả ACK mà không gọi lại callback.
 - STM32 parser hiện chưa có timeout ghép frame theo thời gian. Frame dở được giữ cho đến khi đủ byte, RX overflow hoặc khởi tạo lại parser.
-- Phía Pi chưa nối `UartProtocol.exchange()` vào luồng inference/model.
+- Phía Pi đã nối inference với UART qua sender. Một protocol được dùng cho PING, START rồi độc quyền bởi worker gửi; không gửi PING song song khi pipeline đang chạy.
 - Giới hạn timeout của serial ngăn một lần `read()` chờ lâu hơn thời gian còn lại được yêu cầu, nhưng Python/Linux không phải hệ thống thời gian thực; scheduling của hệ điều hành có thể làm hàm trả về trễ nhẹ so với deadline.
 - Khi hết retry do timeout hoặc gặp lỗi transport, `exchange()` dừng và ném `TransactionTimeout` hoặc `TransportError` lên tầng gọi. Giao dịch mới bị chặn bởi `_uncertain_command` và sẽ ném `UncertainTransaction`; ứng dụng nhận lỗi và dừng luồng gửi trên đối tượng protocol hiện tại.
 - Cơ chế chống trùng chỉ lưu SEQ/CMD gần nhất đã ACK trong RAM. Nếu STM32 reset, trạng thái này mất; giao thức chưa có boot/session ID để xác định reset và khôi phục giao dịch đang chờ.
-- `UartLink_RxOverflowed()` hiện chỉ cung cấp cờ; tầng ứng dụng chưa đọc và xử lý cờ này. RX buffer 64 byte có sức chứa thực tế 63 byte; khi đầy, byte nhận mới bị bỏ.
+- `UartProtocol_Process()` đã đọc `UartLink_RxOverflowed()` để bỏ frame dở. RX buffer 64 byte có sức chứa thực tế 63 byte; khi đầy, byte nhận mới bị bỏ.
 - Các timeout và retry của Pi đang là cấu hình khởi đầu trong source; cần hiệu chỉnh khi đo trên phần cứng. Chưa xác nhận hoạt động hai chiều của giao thức trên hệ thống thực.
 
-## 4. Các mô-đun phần cứng để mở rộng
+## 4. Điều phối và phần cứng STM32
 
 ### 4.1 Servo
 
-File chính: `STM32Firmware/Core/Inc/servo.h`, `STM32Firmware/Core/Src/servo.c`. Hiện có `Set_Servo_Angle()` đổi góc sang giá trị compare PWM; cấu hình kỳ vọng bộ đếm 1 MHz và chu kỳ PWM 20 ms. TIM2 dùng hai kênh cho servo. Khi mở rộng, bổ sung ánh xạ servo/hộp phân loại, góc nghỉ/gạt, giới hạn cơ khí, trình tự FSM, thời gian hồi và cách tránh delay blocking.
+`servo.h/.c` cung cấp `Set_Servo_Angle()` đổi góc sang compare PWM. TIM2 dùng CH1/CH2, bộ đếm 1 MHz và chu kỳ 20 ms. `servo_fsm.h/.c` có một instance cho mỗi servo; nhận sự kiện Start/Stop/Timeout, trả `ServoFsmOutput` để `main.c` áp góc ngay.
+
+Chu trình: UNINITIALIZED → IDLE → DEFLECTING → HOLDING → RETURNING → IDLE. Cấu hình hiện tại cho cả hai servo: góc nghỉ 0°, góc gạt 45°, gạt 200 ms, giữ 2000 ms, hồi 200 ms. Đây là thời gian ước tính, không có xác nhận cơ khí. Servo 1 gạt quả sống; servo 2 gạt quả hư; quả chín đi thẳng.
+
+`cycle_completed` tăng bộ đếm hoàn tất chu trình trong debugger, không đồng nghĩa xác nhận quả vào hộp. Nếu sản phẩm đến hạn mà servo chưa sẵn sàng, app dừng motor, chuyển FAULT, dừng cả hai FSM servo và giữ bản ghi sản phẩm lỗi thay vì gạt trễ.
 
 ### 4.2 Motor
 
-File chính: `STM32Firmware/Core/Inc/motor.h`, `STM32Firmware/Core/Src/motor.c`. API hiện có `Motor_Set_Duty()` và `Motor_Stop()`; `main.c` khởi tạo PWM TIM3 và dừng motor lúc khởi động. Khi mở rộng, bổ sung chân BTS7960, chiều quay, duty an toàn, trạng thái khởi động/dừng, xử lý lỗi và phối hợp motor với FSM.
+`motor.h/.c` điều khiển BTS7960: RPWM = TIM3 CH3, LPWM = TIM3 CH4, R_EN/L_EN = PA4/PA5. `Motor_Set_Duty()` giới hạn duty ở 0..100%, chỉ xuất PWM ở một chiều; đổi chiều cần Stop trước. `Motor_Stop()` hạ enable, xóa cả hai compare và đặt trạng thái MOTOR_STOPPED.
+
+Khởi động firmware đặt motor Stop rồi bật hai kênh PWM TIM3 với compare bằng 0. `App_StartSystem()` dùng chung cho UART START và các đường Start debugger: chỉ khi FSM chấp nhận chuyển vào RUNNING mới gọi `Motor_Set_Duty(&htim3, LPWM, MOTOR_RUNNING_DUTY_PERCENT)`. Duty thử là 30%. Gọi START lúc đã RUNNING không khởi động lại motor.
+
+LPWM được dùng làm chiều trái theo tên chân; chiều cơ khí thực tế phụ thuộc đấu dây. Motor không encoder, nên duty không phải tốc độ đo được và không bảo đảm thời gian di chuyển không đổi khi tải thay đổi.
 
 ### 4.3 Hàng đợi sản phẩm và FSM
 
-`product_queue.h/.c` lưu loại sản phẩm theo FIFO với sức chứa 16. Đây là nơi đệm dữ liệu, không phải nơi quyết định thời điểm gạt. Bổ sung mô tả FSM riêng khi cảm biến, hàng đợi và servo được tích hợp.
+`product_queue.h/.c` dùng mảng vòng cố định 16 phần tử, không cấp phát động. Mỗi `Product` có `product_id`, `type`, `deadline_ms`; ID STM32 được cấp khi enqueue thành công, độc lập với track_id và SEQ của Pi. Có API FIFO và `PeekEarliest`/`PopEarliest` để lấy bản ghi deadline sớm nhất. Việc tìm kiếm tuyến tính phù hợp sức chứa nhỏ; khi xóa giữa mảng vòng, các phần tử phía sau được dịch lại.
+
+Callback `App_HandleProductCommand()` đọc `HAL_GetTick()` một lần và đặt deadline thử:
+
+| Lệnh | Deadline từ lúc STM32 nhận | Hành động khi đến hạn |
+|---|---|---|
+| UNRIPE | +800 ms (1000 − 200) | Khởi động servo 1 |
+| SPOILED | +1800 ms (2000 − 200) | Khởi động servo 2 |
+| RIPE | +5000 ms | Xóa khỏi queue, tăng `ripe_estimated_exit_count`, không gạt |
+
+Đây là thời gian chờ trước khi bắt đầu gạt, khác thời gian toàn chu trình servo. Thời gian Pi xử lý ảnh và chờ UART chưa được bù; phải đo thực tế từ vạch quyết định đến cơ cấu gạt. Bộ đếm quả chín ra cuối băng tải chỉ là ước tính theo thời gian.
+
+`ServoTest_ScheduleTimer()` chọn deadline sớm nhất giữa sản phẩm và servo, lập lịch TIM4 one-shot chạy ở 2 kHz. Deadline dài hơn giới hạn timer 16 bit được chia đoạn. Ngắt TIM4 chỉ đặt cờ; vòng chính cập nhật FSM và điều khiển đầu ra. Khi không còn việc, vòng chính khóa ngắt cho bước kiểm tra cuối rồi dùng WFI, tránh mất tín hiệu đánh thức. SysTick vẫn hoạt động; đây không phải chế độ ngủ sâu.
+
+So sánh thời gian STM32 dùng hiệu unsigned 32 bit để xử lý HAL tick quay vòng; khoảng deadline và độ trễ phục vụ phải nhỏ hơn 2^31 ms.
+
+### 4.4 System FSM và debugger
+
+`system_fsm.h/.c` chỉ quản lý trạng thái, không trực tiếp điều khiển phần cứng:
+
+```text
+INIT --INIT_DONE--> READY --START--> RUNNING
+READY/RUNNING --STOP--> STOPPED
+bất kỳ trạng thái --ERROR--> FAULT
+STOPPED/FAULT --RESET_ALLOWED--> READY
+```
+
+INIT_DONE được phát sau khi các servo đã IDLE. STOP không xóa lỗi FAULT. `main.c` dừng motor và servo khi xử lý Stop/nhánh lỗi liên quan; bản thân `SystemFsm_HandleEvent()` không có tác dụng phụ phần cứng.
+
+Mailbox `servo_test_command` trong debugger:
+
+| Giá trị | Hành động |
+|---|---|
+| 1 / 2 | Thử servo 1 / 2; nếu READY thì tự Start hệ thống và motor trước |
+| 3 | Stop motor và cả hai servo, gửi sự kiện STOP |
+| 4 | Reset khi cả hai servo IDLE và hệ thống STOPPED/FAULT; xóa queue sau khi người vận hành đã dọn băng tải |
+| 5 | Start hệ thống và motor, không thử servo |
+
+Ghi `servo_test_product_id` trước lệnh thử servo. `servo_test_result`: 0 chưa có kết quả, 1 chấp nhận, 2 từ chối.
 
 ## 5. Thống kê và dashboard
 
-Repo có công cụ thu thập ảnh và thử model, nhưng chưa có dashboard sản lượng hoàn chỉnh. Trước khi triển khai, nhóm cần quyết định nguồn dữ liệu, nơi lưu, định nghĩa “đã phân loại” so với “đã gạt thành công”, và dashboard chạy local hay dùng dịch vụ có sẵn. Nên để dashboard đọc dữ liệu từ tầng ứng dụng/lưu trữ; không ghép giao diện web trực tiếp vào `uart_link`.
+Chưa triển khai SQLite store hoặc dashboard trong `conveyor`; hiện kết quả chỉ in ra terminal và có bộ đếm debugger trên STM32. Hướng dự kiến là tầng điều phối ghi sự kiện và kết quả vào SQLite, lưu thời gian UTC và tổng hợp ngày theo Asia/Bangkok. SensorTimestamp/monotonic chỉ dùng đo khoảng thời gian, không dùng trực tiếp làm ngày thống kê.
+
+Cần giữ riêng các ý nghĩa: đã nhận diện/vượt vạch, STM32 đã nhận (ACK), lỗi/chưa gửi, hoàn tất chu trình servo theo thời gian và xác nhận vật lý vào hộp. Hiện chưa có dữ liệu cho mục cuối. Dashboard sau này đọc từ tầng lưu trữ, không điều khiển vòng inference hay ghép vào `uart_link`.
+
+### 5.1 Mức kiểm chứng và việc còn lại
+
+- Bộ test Python dùng camera/model/UART giả cho luồng tích hợp; kiểm tra NumPy thật cho đầu vào detector khi có thư viện. Đây không phải chứng minh hiệu năng hoặc phân loại chính xác trên Pi.
+- Đã có công cụ chạy trọng số thật trên ảnh và xuất bounding box; chất lượng model vẫn cần huấn luyện/đánh giá lại.
+- Driver motor, START, parser và System FSM đã được thử trên máy bằng HAL giả; chưa xác nhận toàn firmware hoặc chiều motor trên phần cứng thực.
+- Cần đo FPS, khoảng dịch chuyển giữa frame, độ trễ và thời gian gạt trên băng tải; hiệu chỉnh tracker/crossing và deadline STM32 theo phép đo.
+- Còn thiếu STOP/heartbeat qua UART, khôi phục phiên khi một bên reset, cảm biến xác nhận, thống kê và dashboard. Mất liên lạc Pi hiện không tự dừng motor.
 
 ## 6. Quy tắc mở rộng tài liệu
 

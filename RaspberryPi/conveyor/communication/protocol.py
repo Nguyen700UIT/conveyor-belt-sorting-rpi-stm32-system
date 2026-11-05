@@ -19,6 +19,7 @@ class Command(IntEnum):
     UNRIPE = 0x02
     RIPE = 0x03
     SPOILED = 0x04
+    START = 0x05
 
 
 class Status(IntEnum):

@@ -12,6 +12,11 @@ model = "models/best.pt"
 confidence = 0.4
 imgsz = 640
 
+[tracker]
+# Trial values: tune using actual displacement and inference interval on the Pi.
+max_distance_px = 80.0
+max_age_seconds = 0.5
+
 [crossing]
 # Normalized position (0..1). Calibrate to the real camera view.
 axis = "x"

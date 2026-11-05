@@ -56,6 +56,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(protocol.exchange(Command.PING).status, Status.PONG)
         self.assertEqual(protocol.sequence, 0)
 
+    def test_start_retries_same_frame_and_accepts_ack(self):
+        uart = FakeUart([response(0, Status.NOT_READY), response(0, Status.ACK)])
+        protocol = UartProtocol(uart, temporary_status_delay=0)
+        self.assertEqual(Command.START, 0x05)
+        self.assertEqual(protocol.exchange(Command.START).status, Status.ACK)
+        self.assertEqual(uart.sent, [build_request(0, Command.START)] * 2)
+        self.assertEqual(protocol.sequence, 1)
+
     def test_parser_skips_noise_corruption_and_wrong_sequence(self):
         corrupt = bytearray(response(0, Status.ACK))
         corrupt[-1] ^= 1

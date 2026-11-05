@@ -39,6 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MOTOR_RUNNING_DUTY_PERCENT 30U
 
 /* USER CODE END PD */
 
@@ -74,7 +75,7 @@ static volatile uint8_t servo_timer_due;
  * Commands: 1 = servo 1, 2 = servo 2, 3 = Stop both,
  * 4 = Reset (operator must first clear the belt), 5 = Start without a servo test.
  * Results: 0 = none, 1 = accepted, 2 = rejected.
- * This bench test never starts the conveyor motor.
+ * Entering RUNNING starts the conveyor motor on LPWM.
  */
 volatile uint32_t servo_test_command;
 volatile uint32_t servo_test_product_id;
@@ -94,6 +95,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
+static bool App_StartSystem(void);
 static UartProtocol_Status_t App_HandleProductCommand(uint8_t command);
 static void ServoTest_Init(void);
 static void ServoTest_ApplyOutput(uint32_t index, const ServoFsmOutput *output);
@@ -107,9 +109,26 @@ static bool ServoTest_BothIdle(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+static bool App_StartSystem(void)
+{
+  if (SystemFsm_GetState() == SYSTEM_RUNNING) return true;
+  if (!SystemFsm_HandleEvent(SYSTEM_EVENT_START)) return false;
+
+  Motor_Set_Duty(&htim3, LPWM, MOTOR_RUNNING_DUTY_PERCENT);
+  return true;
+}
+
 //Callback
 static UartProtocol_Status_t App_HandleProductCommand(uint8_t command)
 {
+  if (command == UART_PROTOCOL_CMD_START)
+  {
+    if (App_StartSystem())
+    {
+      return UART_PROTOCOL_STATUS_ACK;
+    }
+    return UART_PROTOCOL_STATUS_NOT_READY;
+  }
   if (SystemFsm_GetState() != SYSTEM_RUNNING) return UART_PROTOCOL_STATUS_NOT_READY;
   const uint32_t now = HAL_GetTick();
   Product p;
@@ -296,13 +315,13 @@ static void ServoTest_ProcessCommand(void)
   }
   else if (command == 5U)
   {
-    accepted = SystemFsm_HandleEvent(SYSTEM_EVENT_START);
+    accepted = App_StartSystem();
   }
   else if (command == 1U || command == 2U)
   {
     if (SystemFsm_GetState() == SYSTEM_READY)
     {
-      SystemFsm_HandleEvent(SYSTEM_EVENT_START);
+      App_StartSystem();
     }
     if (SystemFsm_GetState() == SYSTEM_RUNNING)
     {
@@ -415,6 +434,11 @@ int main(void)
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   Motor_Stop(&htim3);
+  if (HAL_TIM_PWM_Start(&htim3, RPWM) != HAL_OK
+      || HAL_TIM_PWM_Start(&htim3, LPWM) != HAL_OK)
+  {
+    Error_Handler();
+  }
   ServoTest_Init();
 
   if (UartLink_Init(&huart1) != HAL_OK)

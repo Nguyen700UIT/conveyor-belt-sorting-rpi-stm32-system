@@ -78,7 +78,7 @@ class Sender:
                 self._set_error(error)
                 raise error
             self._queue.append(event)
-            self._condition.notify()
+            self._condition.notify() #Wake up sender thread
 
     def stop(self):
         """Chờ giao dịch hiện tại và callback xong, giữ nguyên sự kiện chưa gửi.
