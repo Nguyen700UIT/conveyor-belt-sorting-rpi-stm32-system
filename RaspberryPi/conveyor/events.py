@@ -1,13 +1,13 @@
-"""Immutable data shared by detection, tracking and product dispatch."""
+"""Dữ liệu bất biến dùng chung cho nhận diện, theo dõi và gửi lệnh phân loại."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Detection:
-    """One observation in one image; it does not identify a fruit across frames."""
+    """Một kết quả nhận diện trong một ảnh, chưa xác định cùng một quả qua nhiều ảnh."""
 
-    # Pixel coordinates on the original image, before inference resizing.
+    # Tọa độ pixel trên ảnh gốc, trước khi đổi kích thước để suy luận.
     xyxy: tuple[float, float, float, float]
     class_id: int
     label: str
@@ -16,10 +16,11 @@ class Detection:
 
 @dataclass(frozen=True)
 class TrackedDetection:
-    """A detection assigned to a fruit by the tracker.
+    """Kết quả nhận diện được bộ theo dõi gắn với một quả.
 
-    track_id stays unique during one pipeline run and is not a UART sequence.
-    observed_at is the source frame's monotonic timestamp, in seconds.
+    track_id là ID duy nhất trong một lần chạy pipeline, khác với SEQ của UART.
+    observed_at là thời gian của khung hình nguồn, tính bằng giây theo đồng hồ
+    đơn điệu (monotonic).
     """
 
     track_id: int
@@ -29,12 +30,12 @@ class TrackedDetection:
 
 @dataclass(frozen=True)
 class CrossingEvent:
-    """A fruit first observed crossing the decision line in the allowed direction.
+    """Sự kiện lần đầu xác nhận một quả vượt vạch quyết định theo chiều cho phép.
 
-    The crossing stage emits at most one event per track_id during a run.
-    label/confidence are the decision at crossing, independent of later frames.
-    crossed_at is the confirming frame's monotonic timestamp, in seconds;
-    it estimates the crossing time, not the time the UART command was sent.
+    Bộ xử lý vượt vạch phát tối đa một sự kiện cho mỗi track_id trong một lần chạy.
+    label/confidence lưu quyết định tại lúc vượt vạch, không đổi theo ảnh về sau.
+    crossed_at là thời gian của khung hình xác nhận, tính bằng giây theo đồng hồ
+    đơn điệu; đây là thời điểm vượt vạch ước tính, không phải thời điểm gửi UART.
     """
 
     track_id: int
