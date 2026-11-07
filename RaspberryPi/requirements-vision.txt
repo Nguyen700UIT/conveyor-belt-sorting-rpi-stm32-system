@@ -1,0 +1,4 @@
+# Install the Ultralytics version matching the training environment first.
+# Pin that version in the Pi deployment after testing the real best.pt.
+-r requirements.txt
+ultralytics

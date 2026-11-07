@@ -1,0 +1,42 @@
+# config.py validates serial, camera and detector settings; pass this file with --config.
+# Copy to config.toml for local settings. Never place API keys here.
+# Local model paths are resolved relative to this TOML file. No API key is needed.
+
+[camera]
+width = 1280
+height = 720
+fps = 10
+
+[detector]
+model = "models/best.pt"
+confidence = 0.4
+imgsz = 640
+
+[tracker]
+# Trial values: tune using actual displacement and inference interval on the Pi.
+max_distance_px = 80.0
+max_age_seconds = 0.5
+
+[crossing]
+# Normalized position (0..1). Calibrate to the real camera view.
+axis = "x"
+position = 0.5
+direction = "increasing"
+
+[serial]
+port = "/dev/ttyUSB0"
+baudrate = 115200
+read_timeout = 0.1
+write_timeout = 1.0
+transaction_timeout = 0.1
+frame_timeout = 0.02
+max_attempts = 3
+retry_delay = 0.02
+temporary_status_delay = 0.1
+
+[sender]
+queue_capacity = 16
+
+[statistics]
+database = "runtime/statistics.sqlite3"
+timezone = "Asia/Bangkok"

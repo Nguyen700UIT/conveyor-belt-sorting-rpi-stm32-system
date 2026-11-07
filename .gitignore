@@ -4,6 +4,9 @@ RaspberryPi/DataCollector/.live/
 RaspberryPi/DataCollector/dataset/
 __pycache__/
 RaspberryPi/ModelTest/.env
+/STM32Firmware/tests
+docs/
+
 
 # Local tools, editor settings, and credentials
 .codex/
@@ -51,6 +54,13 @@ compile_commands.json
 *.onnx
 *.tflite
 *.log
+
+# Conveyor runtime configuration and output
+/RaspberryPi/config.toml
+/RaspberryPi/conveyor/config.toml
+/RaspberryPi/runtime/
+/RaspberryPi/*.sqlite3
+/RaspberryPi/*.sqlite3-*
 
 # OS files
 .DS_Store
