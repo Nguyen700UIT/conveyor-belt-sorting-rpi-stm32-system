@@ -5,7 +5,6 @@ YOLO detects unripe, ripe, and damaged fruit. The Pi tracks each fruit and
 sends its class over UART when it crosses a counting line.
 
 STM32 controls two MG90S servos and a JGB37-545 motor through a BTS7960 driver.
-Two E3F-DS30C4 infrared sensors detect fruit at the sorting positions.
 A LAN dashboard shows daily counts, UART outcomes, and live camera overlays.
 SQLite keeps production history. Local PyTorch and NCNN models are supported.
 

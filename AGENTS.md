@@ -1,13 +1,31 @@
 # Tổng quan project
-Mình sử dụng STM32 để lái servo gạt sản phẩm xuống hộp phân loại. Hiện tại hệ thống sẽ có 3 loại sản phẩm là tắc sống, tắc chín và tắc hư. Hệ thống sử dụng 2 servo MG90S và trước mỗi servo sẽ có 1 cảm biến hồng ngoại E3F-DS30C4 để phát hiện vật đến đúng vị trí giúp servo có thể gạt đúng lúc.
 
-STM32 sẽ sử dụng mạch cầu BTS7960 để lái motor JGB37 545 không encoder.
+Hệ thống băng tải phân loại tắc sống, tắc chín và tắc hư bằng Raspberry Pi 5 và STM32F103C8T6.
 
-STM32 và Pi 5 sẽ sử dụng giao tiếp UART. Pi 5 sẽ nhận UART bằng USB thông qua module CP2102 để giao tiếp với STM32. Pi 5 sử dụng thuật toán YOLO phát hiện loại quả tắc trên bằng chuyền sau khi vật thể được băng tải đưa đến 1 vị trí trên khung hình lúc đó Pi 5 sẽ gửi tín hiệu cho STM32 để thông báo servo nào cần gạt hoặc không cần gạt (tình huống không cần gạt là tình huống trái đạt tiêu chuẩn có thể tiêu thụ).
+- Pi lấy ảnh từ Picamera2, dùng YOLO nhận diện, theo dõi ID và gửi loại quả khi tâm box vượt vạch đếm đúng chiều. Model dùng đúng ba nhãn `green`, `riped`, `damaged`; hỗ trợ trọng số `.pt` và thư mục NCNN `*_ncnn_model`.
+- STM32 điều khiển hai servo MG90S và motor JGB37-545 không encoder qua BTS7960. Firmware dùng hàng đợi sản phẩm, deadline thời gian và FSM servo để gạt quả sống/hư; quả chín đi tiếp. Thời gian di chuyển và servo cần hiệu chỉnh theo băng tải thật.
+- Pi giao tiếp USART1 của STM32 qua USB CP2102, 115200 baud, 8N1. CP2102 TX nối PA10, RX nối PA9, GND nối chung.
+- SQLite lưu sự kiện vượt vạch và kết quả UART. Dashboard FastAPI trên LAN hiển thị sản lượng theo ngày, SSE và camera MJPEG có khung YOLO, nhãn, vạch đếm.
 
-Hạn chế sử dụng polling trong project này vì mục tiêu mình cần là tiết kiệm tài nguyên và năng lượng 1 cách tối đa hết mức có thể
+## Cấu trúc và vận hành
 
-Project sẽ có thống kê số lượng quả của từng loại và có web server dashboard để hiện các thống kê sản lượng trong mỗi ngày.
+- `STM32Firmware/Core/` chứa firmware; cấu hình CubeMX ở `STM32Firmware/STM32Firmware.ioc`.
+- `RaspberryPi/conveyor/app.py` điều phối camera, detector, tracker, crossing và sender. Logic nhận diện ở `vision/`, giao tiếp ở `communication/`, lưu dữ liệu ở `statistics/`, web và stream ở `dashboard/`.
+- `RaspberryPi/config.example.toml` là cấu hình mẫu. Đường dẫn model, database và font tương đối được tính từ file TOML.
+- `RaspberryPi/notebooks/ce224-yolo.ipynb` phục vụ transfer learning trên Kaggle và export NCNN. `RaspberryPi/dataset_tools/` chuẩn bị augmentation theo nhóm quả.
+- `--run` tự PING, mở camera, warmup rồi gửi START. `--dashboard` chỉ xem lịch sử. `--ping` và `--start` dùng để kiểm tra UART và khởi động motor.
+- Firmware hiện dừng bằng `servo_test_command = 3` trong debugger. Reset trạng thái bằng lệnh `4` khi hai servo idle và băng tải đã được dọn. Pi thoát hoặc lỗi không tự gửi STOP motor.
+
+## Các ràng buộc kỹ thuật
+
+- Ưu tiên tiết kiệm tài nguyên và năng lượng. Dùng blocking I/O, Event, Condition và notification; hạn chế polling, tránh busy-wait.
+- Camera stream dùng lại frame và kết quả inference. Một worker giữ frame mới nhất, encode dùng chung khi có người xem.
+- Số lượng chính tính theo vượt vạch. ACK biểu thị STM32 chấp nhận lệnh; xác nhận quả vào hộp cần bằng chứng riêng từ phần cứng.
+- Chống ghi trùng bằng `(session_id, track_id)`. Lưu thời gian UTC, tổng hợp ngày theo `Asia/Bangkok`. Kết quả UART không rõ cần được ghi nhận để xử lý khôi phục, tránh tự gửi bù.
+- Giữ các ảnh và biến thể của cùng một quả trong cùng split khi train/validation/test. Chọn cấu hình model bằng validation hoặc CV theo nhóm quả.
+- Dataset, trọng số model, cấu hình cá nhân, runtime và tests được giữ cục bộ theo `.gitignore`. Theo yêu cầu hiện tại, không commit tests lên repository.
+- README dùng tiếng Anh, viết ngắn gọn về mô tả hệ thống và cài đặt.
+
 # Các quy tắc chính khi làm việc 
 ## 1. Suy nghĩ trước khi code
 * Phát biểu giả định ra lời. Nếu yêu cầu mơ hồ — hỏi. Nếu có cách đơn giản hơn — phản đối. Khi bối rối, dừng lại, chỉ ra điều chưa rõ thay vì tự chọn một cách diễn giải rồi cứ thế chạy.
