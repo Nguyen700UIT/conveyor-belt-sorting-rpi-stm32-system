@@ -65,9 +65,9 @@ static volatile HAL_StatusTypeDef uart_protocol_status = HAL_OK;
 static ServoFsm servo_fsms[2];
 static const ServoFsmConfig servo_configs[2] = {
   { .rest_angle = 0, .deflect_angle = 45,
-    .deflect_ms = 200U, .hold_ms = 500U, .return_ms = 200U },
+    .deflect_ms = 100U, .hold_ms = 200U, .return_ms = 100U },
   { .rest_angle = 0, .deflect_angle = 45,
-    .deflect_ms = 200U, .hold_ms = 500U, .return_ms = 200U }
+    .deflect_ms = 100U, .hold_ms = 200U, .return_ms = 100U }
 };
 static volatile uint8_t servo_timer_due;
 

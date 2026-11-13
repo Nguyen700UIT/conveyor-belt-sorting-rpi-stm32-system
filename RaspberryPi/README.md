@@ -1,8 +1,9 @@
 # Pipeline Raspberry Pi
 
 Package `conveyor` có pipeline Picamera2 → detector → tracker → crossing → sender
-→ STM32. Detector Ultralytics dùng trọng số cục bộ. Thống kê và dashboard chưa
-triển khai; pipeline cần kiểm chứng trên phần cứng và hiệu chỉnh thời gian gạt.
+→ STM32. Detector Ultralytics dùng trọng số cục bộ. SQLite lưu số quả vượt vạch;
+dashboard LAN có thống kê theo ngày, SSE và camera MJPEG. Pipeline cần kiểm chứng
+trên phần cứng và hiệu chỉnh thời gian gạt.
 `DataCollector/` và `ModelTest/` tiếp tục chạy riêng theo README của từng công cụ.
 
 ## Cài đặt và chạy phần hiện có
@@ -15,6 +16,8 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python -m conveyor --help
 .venv/bin/python -m conveyor --ping --port /dev/ttyUSB0
 .venv/bin/python -m conveyor --ping --config config.toml
+# Bộ test đầy đủ cần requirements-test.txt (không cần Picamera2/Ultralytics).
+.venv/bin/python -m pip install -r requirements-test.txt
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -58,6 +61,9 @@ Chương trình tải model một lần, mở camera và warmup trên ảnh th�
 Picamera2 dùng RGB888 (mảng BGR), timestamp lấy từ metadata SensorTimestamp của
 cùng ảnh. Camera chờ ảnh mới; sender ngủ khi queue rỗng. Không cần trình duyệt
 hoặc màn hình. Terminal hiện số track, thời gian inference, CROSS và ACK/lỗi.
+Thêm `--debug-tracking` khi chạy `--run` để xem ID, nhãn, confidence, tọa độ tâm
+chuẩn hóa và vạch quyết định từng frame. Dùng log này để xác định mất nhận diện,
+đổi ID, sai chiều hoặc chưa vượt vạch trước khi điều chỉnh tracker.
 ACK nghĩa là STM32 đã nhận, không xác nhận gạt thành công.
 
 Vạch quyết định dùng tâm box và cấu hình chuẩn hóa: `axis="x"`, `position=0.5`,
@@ -81,20 +87,95 @@ nhận quả mới. **Motor không tự dừng khi Pi thoát hoặc lỗi:** dù
 `servo_test_command=3` để Stop. Sau kết quả UART không rõ, không chạy lại để gửi
 bù sản phẩm; cần dừng, dọn băng tải và khôi phục trạng thái/phiên UART trước.
 
-`requirements.txt` chỉ chứa pyserial để kiểm tra UART. Detector dùng bộ phụ thuộc
+`requirements.txt` chứa pyserial và tzdata. Detector dùng bộ phụ thuộc
 riêng `requirements-vision.txt`; không dùng môi trường Roboflow của ModelTest.
 Sao chép `config.example.toml` thành `config.toml` và truyền `--config config.toml`.
 Loader kiểm tra `serial`, `camera` (width/height/fps nguyên dương) và `detector`
-(model là đường dẫn `.pt`, imgsz nguyên dương, confidence hữu hạn trong khoảng mở 0..1). Các bảng còn lại
-dành cho bước tiếp theo. Khi dùng `--config`, cần cả ba bảng kể cả lúc PING.
+(model là đường dẫn `.pt`, imgsz nguyên dương, confidence hữu hạn trong khoảng mở 0..1).
+Các bảng statistics/dashboard/stream có mặc định và được kiểm tra trước khi mở thiết bị.
+Khi dùng `--config`, cần cả ba bảng kể cả lúc PING hoặc chỉ xem dashboard.
 Nếu truyền thêm `--port`, cổng CLI ưu tiên hơn cổng trong file. Chỉ dùng `--port`
 thì các tham số UART còn lại lấy mặc định của transport/protocol. Đường dẫn tương đối
 tới file cấu hình tính từ thư mục đang chạy lệnh. Riêng đường dẫn model tương đối
-tính từ thư mục chứa TOML, được loader chuyển thành tuyệt đối.
+tính từ thư mục chứa TOML, được loader chuyển thành tuyệt đối; database và font cũng vậy.
 Cấu hình sai trả lỗi trước khi mở cổng; PING không cần file trọng số tồn tại.
 Đường dẫn output dự kiến dùng thư mục
 `runtime/`. Cấu hình cá nhân, output và SQLite không được commit.
 Package vận hành không cần API key Roboflow. ModelTest cũ vẫn dùng cấu hình riêng.
+
+## Dashboard LAN và camera stream
+
+Từ thư mục `RaspberryPi`, cài phần web và font tiếng Việt:
+
+```sh
+sudo apt install fonts-dejavu-core
+.venv/bin/python -m pip install -r requirements-dashboard.txt
+```
+
+Thêm các bảng dưới vào `conveyor/config.toml`. Nếu TOML nằm ngay trong
+`RaspberryPi`, dùng `database = "runtime/statistics.sqlite3"`.
+
+```toml
+[statistics]
+database = "../runtime/statistics.sqlite3"
+timezone = "Asia/Bangkok"
+
+[dashboard]
+enabled = true
+host = "0.0.0.0"
+port = 8000
+
+[stream]
+width = 640
+fps = 5
+quality = 70
+font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+```
+
+Web mặc định tắt khi thiếu `[dashboard]`. Sau khi bật, chạy pipeline như trước:
+
+```sh
+.venv/bin/python -m conveyor --run --config conveyor/config.toml
+```
+
+Mở `http://<IP-cua-Pi>:8000` từ điện thoại/máy tính cùng LAN. Đây là web chỉ đọc
+cho LAN tin cậy, chưa có đăng nhập; không mở cổng ra Internet. Có bốn thẻ tổng,
+tắc sống/chín/hư, tỷ lệ, ngày chọn, biểu đồ và bảng lịch sử (mặc định 7 ngày,
+tối đa 366 ngày). Thống kê dựa trên quả vượt vạch, không phải số quả chắc chắn
+đã vào hộp. Kết quả UART tách thành đang chờ, ACK, từ chối, chưa gửi và không rõ.
+
+Camera mặc định không xem. Bấm **Bật xem camera** để nhận MJPEG có khung YOLO,
+nhãn tiếng Việt, confidence và vạch đếm. Camera dùng lại frame/kết quả inference;
+không mở camera thứ hai. Một worker giữ frame mới nhất, encode một lần cho mọi
+client, bỏ frame cũ và ngừng encode khi không còn người xem. Mặc định tối đa
+640 px chiều rộng, 5 FPS, JPEG quality 70; giảm width/fps khi Pi bị tăng độ trễ.
+Thiếu font hoặc lỗi encoder chỉ tắt stream và báo trạng thái; không dừng phân loại.
+
+Xem lịch sử khi không chạy băng tải:
+
+```sh
+.venv/bin/python -m conveyor --dashboard --config conveyor/config.toml
+```
+
+Chế độ này luôn mở web, kể cả `enabled=false`; không import vision, mở UART,
+camera hoặc START motor. Không chạy đồng thời với `--run` trên cùng cổng.
+Camera báo chưa hoạt động. Web/SSE/MJPEG đóng cùng process khi Ctrl+C hoặc
+pipeline lỗi; trình duyệt sẽ báo mất kết nối. Motor vẫn phải dừng riêng như trên.
+
+SQLite lưu UTC, quy đổi ngày theo timezone cấu hình. Khóa phiên + track ID ngăn
+retry/callback trùng làm tăng số lượng; tracker đổi ID vẫn có thể đếm sai.
+Ghi sự kiện trước gửi UART; SQLite lỗi làm pipeline dừng nhận quả mới. Khi pipeline
+khởi động lại, sự kiện dang dở thành không rõ và không gửi bù. Có khóa OS ngăn
+hai pipeline cùng ghi một database; không xóa file `.pipeline.lock` khi đang chạy.
+WAL và kết nối đọc riêng cho phép dashboard đọc trong lúc ghi. Không tự xóa lịch sử.
+
+API: `/api/summary?date=YYYY-MM-DD`, `/api/daily?start=YYYY-MM-DD&end=YYYY-MM-DD`,
+`/api/events` (SSE), `/camera/stream` (MJPEG). SSE chỉ thông báo sau commit hoặc
+đổi trạng thái camera; trình duyệt gộp tải lại số liệu, không polling định kỳ.
+
+Nghiệm thu trên Pi: đo inference và độ trễ UART khi tắt/bật stream với 1–3 người
+xem, kiểm tra camera lỗi, ngắt mạng, đổi ngày và dữ liệu sau restart. Test giả lập
+không chứng minh đạt mục tiêu cập nhật 1 giây hoặc thời điểm gạt trên phần cứng.
 
 ## Model Ultralytics cục bộ
 
@@ -267,4 +348,4 @@ không tồn tại qua reset; cần quy trình khôi phục riêng trước khi 
 
 Camera bị lỗi, queue đầy hoặc lỗi UART không tự dừng motor STM32: giao thức
 hiện chưa có lệnh Stop/heartbeat. Đây là phần phải bổ sung trước vận hành tự động.
-Preview và dashboard để bước sau; không đặt logic phân loại trong HTTP handler.
+Dashboard/camera đã tích hợp; không đặt logic phân loại trong HTTP handler.

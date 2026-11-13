@@ -6,6 +6,7 @@ __pycache__/
 RaspberryPi/ModelTest/.env
 /STM32Firmware/tests
 docs/
+dataset/
 
 
 # Local tools, editor settings, and credentials
@@ -53,12 +54,14 @@ compile_commands.json
 *.pth
 *.onnx
 *.tflite
+/RaspberryPi/models/*_ncnn_model/
 *.log
 
 # Conveyor runtime configuration and output
 /RaspberryPi/config.toml
 /RaspberryPi/conveyor/config.toml
 /RaspberryPi/runtime/
+/RaspberryPi/conveyor/runtime/
 /RaspberryPi/*.sqlite3
 /RaspberryPi/*.sqlite3-*
 

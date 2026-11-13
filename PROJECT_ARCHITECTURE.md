@@ -9,7 +9,7 @@ Dự án hướng tới phân loại tắc sống, tắc chín và tắc hư b�
 - **Raspberry Pi:** nhận hình ảnh, chạy YOLO và quyết định loại quả.
 - **UART qua USB-UART CP2102:** chuyển byte giữa Pi và STM32. Hai đầu cần cùng cấu hình; firmware hiện đặt USART1 ở 115200 baud, 8N1.
 - **STM32:** nhận lệnh, lập lịch bằng deadline, điều khiển hai servo MG90S và motor JGB37 qua BTS7960. Cảm biến E3F-DS30C4 dự kiến bổ sung sau; hiện chưa tham gia quyết định gạt.
-- **Thống kê/dashboard:** dự kiến SQLite và giao diện sản lượng theo ngày; hiện chưa triển khai `store.py` hoặc web server trong package vận hành.
+- **Thống kê/dashboard:** SQLite lưu quả vượt vạch và kết quả UART; FastAPI phục vụ thống kê theo ngày, SSE và camera MJPEG dùng chung frame pipeline.
 
 Hướng thiết kế là xử lý theo sự kiện, hạn chế polling. Pi chờ frame camera và sender chờ Condition; STM32 dùng ngắt UART, timer deadline và WFI khi không còn việc. `app.py` và `main.c` điều phối, các mô-đun xử lý trách nhiệm riêng.
 
@@ -335,9 +335,11 @@ Ghi `servo_test_product_id` trước lệnh thử servo. `servo_test_result`: 0 
 
 ## 5. Thống kê và dashboard
 
-Chưa triển khai SQLite store hoặc dashboard trong `conveyor`; hiện kết quả chỉ in ra terminal và có bộ đếm debugger trên STM32. Hướng dự kiến là tầng điều phối ghi sự kiện và kết quả vào SQLite, lưu thời gian UTC và tổng hợp ngày theo Asia/Bangkok. SensorTimestamp/monotonic chỉ dùng đo khoảng thời gian, không dùng trực tiếp làm ngày thống kê.
+`statistics/store.py` lưu một dòng cho mỗi `(session_id, track_id)`: nhãn, confidence, thời điểm UTC, kết quả UART, sequence và lỗi. `app.py` ghi toàn bộ crossing trong frame trước khi submit UART, cập nhật kết quả từ callback và đánh dấu chưa gửi khi dừng. Timestamp camera được chuyển sang UTC bằng mốc monotonic/wall-clock đầu phiên; ngày được tổng hợp theo timezone cấu hình (mặc định Asia/Bangkok). Retry và callback trùng không tăng số quả. Phiên cũ còn pending được đánh dấu unknown khi pipeline mới khởi động, không gửi bù. SQLite WAL, khóa ghi giữa luồng, kết nối đọc riêng và khóa OS cho một pipeline/database giữ các thao tác ngắn, tránh hai pipeline khôi phục nhầm phiên của nhau.
 
-Cần giữ riêng các ý nghĩa: đã nhận diện/vượt vạch, STM32 đã nhận (ACK), lỗi/chưa gửi, hoàn tất chu trình servo theo thời gian và xác nhận vật lý vào hộp. Hiện chưa có dữ liệu cho mục cuối. Dashboard sau này đọc từ tầng lưu trữ, không điều khiển vòng inference hay ghép vào `uart_link`.
+Cần giữ riêng các ý nghĩa: vượt vạch, STM32 đã nhận (ACK), lỗi/chưa gửi và xác nhận vật lý vào hộp. Hiện chưa có dữ liệu cho mục cuối. `dashboard/runtime.py` quản lý store, camera stream và server. Web chạy một luồng riêng trong process pipeline; HTTP handler không điều khiển inference hoặc motor. Web tắt mặc định; `--dashboard` mở lịch sử riêng mà không tải model/camera/UART.
+
+`dashboard/web.py` cung cấp API summary/daily, SSE và MJPEG. SSE phát sau commit và khi camera đổi trạng thái; mỗi client giữ tối đa một notification, heartbeat không truy vấn DB. `dashboard/stream.py` dùng một worker Condition, chỉ sao chép frame khi có người xem, giữ tối đa một frame chờ, encode JPEG một lần rồi chia sẻ. Pillow vẽ tiếng Việt bằng font DejaVu Sans; lỗi encoder chỉ tắt stream. Client chậm không tạo hàng đợi ảnh. Frontend tĩnh tự phục vụ trên Pi, camera mặc định tắt, không cần CDN. Toàn bộ web đóng khi pipeline thoát; mất liên lạc không có nghĩa motor đã dừng. Hướng dẫn cấu hình, cài đặt và kiểm tra trên Pi nằm trong `RaspberryPi/README.md`.
 
 ### 5.1 Mức kiểm chứng và việc còn lại
 
@@ -345,7 +347,7 @@ Cần giữ riêng các ý nghĩa: đã nhận diện/vượt vạch, STM32 đã
 - Đã có công cụ chạy trọng số thật trên ảnh và xuất bounding box; chất lượng model vẫn cần huấn luyện/đánh giá lại.
 - Driver motor, START, parser và System FSM đã được thử trên máy bằng HAL giả; chưa xác nhận toàn firmware hoặc chiều motor trên phần cứng thực.
 - Cần đo FPS, khoảng dịch chuyển giữa frame, độ trễ và thời gian gạt trên băng tải; hiệu chỉnh tracker/crossing và deadline STM32 theo phép đo.
-- Còn thiếu STOP/heartbeat qua UART, khôi phục phiên khi một bên reset, cảm biến xác nhận, thống kê và dashboard. Mất liên lạc Pi hiện không tự dừng motor.
+- Còn thiếu STOP/heartbeat qua UART, khôi phục phiên UART khi một bên reset và cảm biến xác nhận. Thống kê/dashboard có test trên máy; cần đo thêm trên Pi với 1–3 client stream. Mất liên lạc Pi hiện không tự dừng motor.
 
 ## 6. Quy tắc mở rộng tài liệu
 

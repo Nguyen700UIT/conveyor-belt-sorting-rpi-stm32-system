@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Thống kê băng tải</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">HỆ THỐNG PHÂN LOẠI TẮC</p><h1>Sản lượng băng tải</h1></div>
+      <div class="connection"><span id="connection">Đang kết nối…</span><small id="updated">Chưa cập nhật</small></div></header>
+    <p class="note">Đếm khi quả vượt vạch nhận diện · Ngày thống kê: <span id="timezone">Asia/Bangkok</span></p>
+    <section class="toolbar"><label>Ngày thống kê <input id="day" type="date" required></label><button id="today">Hôm nay</button></section>
+    <p id="error" role="alert" hidden></p>
+    <section class="cards" aria-label="Số lượng theo loại">
+      <article><span>Tổng quả</span><strong id="total">0</strong><small>Quả vượt vạch</small></article>
+      <article class="green"><span>Tắc sống</span><strong id="green">0</strong><small id="green-ratio">0%</small></article>
+      <article class="ripe"><span>Tắc chín</span><strong id="riped">0</strong><small id="riped-ratio">0%</small></article>
+      <article class="damaged"><span>Tắc hư</span><strong id="damaged">0</strong><small id="damaged-ratio">0%</small></article>
+    </section>
+    <section class="panel"><h2>Kết quả gửi STM32</h2><p class="note">ACK xác nhận nhận lệnh, chưa xác nhận quả đã vào đúng hộp.</p><div id="outcomes" class="outcomes"></div></section>
+    <section class="panel"><div class="section-head"><div><h2>Camera trực tiếp</h2><p id="camera-status" class="note">Camera chưa hoạt động</p></div><button id="camera-toggle" disabled>Bật xem camera</button></div>
+      <div class="camera"><p id="camera-placeholder">Bật xem để nhận ảnh. Không encode ảnh khi không có người xem.</p><img id="camera-image" alt="Camera băng tải với khung nhận diện YOLO và vạch đếm" hidden></div>
+    </section>
+    <section class="panel"><h2>Lịch sử theo ngày</h2><div class="toolbar"><label>Từ ngày <input id="start" type="date" required></label><label>Đến ngày <input id="end" type="date" required></label><button id="history">Xem lịch sử</button></div>
+      <p class="legend"><span class="green">● Tắc sống</span><span class="ripe">● Tắc chín</span><span class="damaged">● Tắc hư</span></p>
+      <div id="chart" aria-label="Biểu đồ sản lượng theo ngày"></div>
+      <div class="table-scroll"><table><thead><tr><th>Ngày</th><th>Tắc sống</th><th>Tắc chín</th><th>Tắc hư</th><th>Tổng</th></tr></thead><tbody id="daily"></tbody></table></div>
+    </section>
+  </main>
+</body>
+</html>
