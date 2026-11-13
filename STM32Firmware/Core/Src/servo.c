@@ -9,7 +9,7 @@ static uint32_t Servo_Angle_To_Pulse(int16_t angle)
     }
 
     return MIN_COUNTS
-        + ((uint32_t)angle * (MAX_COUNTS - MIN_COUNTS) + 90U) / 180U;
+        + ((uint32_t)angle * (MAX_COUNTS - MIN_COUNTS)) / 180U;
 }
 
 void Set_Servo_Angle(TIM_HandleTypeDef* htim, uint32_t channel, int16_t angle)

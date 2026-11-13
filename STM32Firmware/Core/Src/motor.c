@@ -1,11 +1,11 @@
 #include "motor.h"
 
-static Motor_State state;
+static Motor_State state = MOTOR_STOPPED;
 
 void Motor_Stop(TIM_HandleTypeDef* htim)
 {
     if (htim == NULL) return;
-    state = 0;
+    state = MOTOR_STOPPED;
     HAL_GPIO_WritePin(MOTOR_EN_PORT, R_EN | L_EN, GPIO_PIN_RESET);
 
     __HAL_TIM_SET_COMPARE(htim, RPWM, 0);
@@ -36,8 +36,9 @@ void Motor_Set_Duty(TIM_HandleTypeDef *htim, uint32_t channel, uint8_t duty_perc
         {
             if (state == LPWM_RUNNING) return;
             state = RPWM_RUNNING;
-            __HAL_TIM_SET_COMPARE(htim, LPWM, pulse);
-            __HAL_TIM_SET_COMPARE(htim, RPWM, 0);
+            __HAL_TIM_SET_COMPARE(htim, RPWM, pulse);
+            __HAL_TIM_SET_COMPARE(htim, LPWM, 0);
+            break;
         }
         case LPWM:
         {

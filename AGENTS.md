@@ -19,6 +19,6 @@ Project sẽ có thống kê số lượng quả của từng loại và có web
 * Biến chỉ thị mơ hồ thành mục tiêu kiểm chứng được trước khi viết dòng code nào. "Thêm validation" thành "viết test cho các input không hợp lệ, sau đó làm test pass."
 # Các quy tắc phụ
 * Ưu tiên trả lời bằng tiếng Việt 
-
+* Viết code Python tường minh
 * Luôn hỏi mình có muốn tự viết phần code này không? Nếu có thì hãy hướng dẫn mình viết phần code đó sao cho mình cũng có thể hiểu đoạn code (tưởng tượng bạn như 1 người giảng viên hướng dẫn mình viết và khi hướng dẫn hãy chỉ cung cấp thuật toán thay vì viết code ra), nếu không sau khi viết phần code hãy giải thích về các đoạn code bạn thêm hoặc thay đổi
  

@@ -1,0 +1,3 @@
+# UART-only dependencies. Install requirements-vision.txt for the local .pt detector.
+pyserial>=3.5,<4
+tzdata>=2024.1

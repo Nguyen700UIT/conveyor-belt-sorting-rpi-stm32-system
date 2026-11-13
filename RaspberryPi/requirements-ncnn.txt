@@ -1,0 +1,4 @@
+# Match the notebook export environment. Install before running on the Pi.
+-r requirements-vision.txt
+ultralytics==8.4.194
+ncnn

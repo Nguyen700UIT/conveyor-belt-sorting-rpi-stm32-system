@@ -12,6 +12,8 @@ phần cứng. Hệ thống hướng tới xử lý bằng sự kiện
 - `STM32Firmware/cmake/`: toolchain và cấu hình build.
 - `RaspberryPi/DataCollector/`: công cụ thu thập ảnh, kiểm tra chất lượng và tài liệu.
 - `RaspberryPi/ModelTest/`: thử mô hình nhận diện với camera trên Pi.
+- `RaspberryPi/conveyor/`: package vận hành, hiện có UART và lệnh kiểm tra PING.
+- `RaspberryPi/README.md`: cài đặt, cấu trúc và lộ trình tự viết pipeline Pi.
 - `AGENTS.md`: hướng dẫn làm việc trong repository.
 
 ## Build firmware

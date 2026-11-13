@@ -13,8 +13,17 @@ typedef enum
     PRODUCT_SPOILED
 } ProductType;
 
-bool ProductQueue_Push(ProductType product);
-bool ProductQueue_Pop(ProductType *product);
+typedef struct 
+{
+    uint32_t product_id;
+    ProductType type;
+    uint32_t deadline_ms;
+} Product;
+
+bool ProductQueue_Push(Product product);
+bool ProductQueue_Pop(Product *product);
+bool ProductQueue_PeekEarliest(Product* product);
+bool ProductQueue_PopEarliest(Product* product);
 uint8_t ProductQueue_Count(void);
 
 #endif /* PRODUCT_QUEUE_H */
