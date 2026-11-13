@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MOTOR_RUNNING_DUTY_PERCENT 30U
+#define MOTOR_RUNNING_DUTY_PERCENT 80U
 
 /* USER CODE END PD */
 
@@ -65,9 +65,9 @@ static volatile HAL_StatusTypeDef uart_protocol_status = HAL_OK;
 static ServoFsm servo_fsms[2];
 static const ServoFsmConfig servo_configs[2] = {
   { .rest_angle = 0, .deflect_angle = 45,
-    .deflect_ms = 200U, .hold_ms = 2000U, .return_ms = 200U },
+    .deflect_ms = 200U, .hold_ms = 500U, .return_ms = 200U },
   { .rest_angle = 0, .deflect_angle = 45,
-    .deflect_ms = 200U, .hold_ms = 2000U, .return_ms = 200U }
+    .deflect_ms = 200U, .hold_ms = 500U, .return_ms = 200U }
 };
 static volatile uint8_t servo_timer_due;
 
@@ -75,7 +75,7 @@ static volatile uint8_t servo_timer_due;
  * Commands: 1 = servo 1, 2 = servo 2, 3 = Stop both,
  * 4 = Reset (operator must first clear the belt), 5 = Start without a servo test.
  * Results: 0 = none, 1 = accepted, 2 = rejected.
- * Entering RUNNING starts the conveyor motor on LPWM.
+ * Entering RUNNING starts the conveyor motor on RPWM.
  */
 volatile uint32_t servo_test_command;
 volatile uint32_t servo_test_product_id;
@@ -114,7 +114,7 @@ static bool App_StartSystem(void)
   if (SystemFsm_GetState() == SYSTEM_RUNNING) return true;
   if (!SystemFsm_HandleEvent(SYSTEM_EVENT_START)) return false;
 
-  Motor_Set_Duty(&htim3, LPWM, MOTOR_RUNNING_DUTY_PERCENT);
+  Motor_Set_Duty(&htim3, RPWM, MOTOR_RUNNING_DUTY_PERCENT);
   return true;
 }
 
@@ -139,7 +139,7 @@ static UartProtocol_Status_t App_HandleProductCommand(uint8_t command)
     case UART_PROTOCOL_CMD_UNRIPE:
     {
       p.type = PRODUCT_UNRIPE;
-      p.deadline_ms = now + (1000U - 200U);
+      p.deadline_ms = now + 1900U;
       break;
     }
     case UART_PROTOCOL_CMD_RIPE:
@@ -151,7 +151,7 @@ static UartProtocol_Status_t App_HandleProductCommand(uint8_t command)
     case UART_PROTOCOL_CMD_SPOILED:
     {
       p.type = PRODUCT_SPOILED;
-      p.deadline_ms = now + (2000U - 200U);
+      p.deadline_ms = now + 4200U;
       break;
     }
     default:
@@ -447,7 +447,6 @@ int main(void)
   }
   UartProtocol_Init(App_HandleProductCommand);
   /* USER CODE END 2 */
-
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -455,6 +454,7 @@ int main(void)
     ServoTest_ProcessCommand();
     uart_protocol_status = UartProtocol_Process();
     ServoTest_ProcessTimeouts();
+
 
     /* A pending IRQ wakes WFI even while PRIMASK is set. Masking the final
      * check and sleep prevents losing a deadline between them.
