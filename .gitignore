@@ -5,6 +5,9 @@ RaspberryPi/DataCollector/dataset/
 __pycache__/
 RaspberryPi/ModelTest/.env
 /STM32Firmware/tests
+/RaspberryPi/tests/
+/RaspberryPi/DataCollector/tests/
+/RaspberryPi/requirements-test.txt
 docs/
 dataset/
 
