@@ -1,43 +1,64 @@
-# Conveyor Belt
+# Conveyor Belt Fruit Sorting System
 
-Project băng chuyền phân loại tắc sống, tắc chín và tắc hư bằng Raspberry Pi 5
-và STM32F103C8T6. Pi xử lý camera; STM32 phụ trách giao tiếp UART và điều khiển
-phần cứng. Hệ thống hướng tới xử lý bằng sự kiện
+A kumquat sorting conveyor powered by Raspberry Pi 5 and STM32F103C8T6.
+YOLO detects unripe, ripe, and damaged fruit. The Pi tracks each fruit and
+sends its class over UART when it crosses a counting line.
 
-## Cấu trúc
+STM32 controls two MG90S servos and a JGB37-545 motor through a BTS7960 driver.
+Two E3F-DS30C4 infrared sensors detect fruit at the sorting positions.
+A LAN dashboard shows daily counts, UART outcomes, and live camera overlays.
+SQLite keeps production history. Local PyTorch and NCNN models are supported.
 
-- `STM32Firmware/Core/`: mã C cho UART, servo và hàng đợi sản phẩm đang phát triển.
-- `STM32Firmware/Drivers/`: STM32 HAL và CMSIS, giữ kèm giấy phép của nhà cung cấp.
-- `STM32Firmware/STM32Firmware.ioc`: cấu hình phần cứng STM32CubeMX.
-- `STM32Firmware/cmake/`: toolchain và cấu hình build.
-- `RaspberryPi/DataCollector/`: công cụ thu thập ảnh, kiểm tra chất lượng và tài liệu.
-- `RaspberryPi/ModelTest/`: thử mô hình nhận diện với camera trên Pi.
-- `RaspberryPi/conveyor/`: package vận hành, hiện có UART và lệnh kiểm tra PING.
-- `RaspberryPi/README.md`: cài đặt, cấu trúc và lộ trình tự viết pipeline Pi.
-- `AGENTS.md`: hướng dẫn làm việc trong repository.
+Model labels are `green`, `riped`, and `damaged`. Counts represent line crossings.
+UART ACK confirms that STM32 accepted a command.
 
-## Build firmware
+## Installation
 
-Cần CMake 3.22 trở lên, Ninja và ARM GNU Toolchain (`arm-none-eabi-gcc`)
-trong `PATH`. Từ thư mục `STM32Firmware`:
+Clone the repository on your development machine and Raspberry Pi.
 
 ```sh
+git clone https://github.com/Nguyen700UIT/conveyor-belt-sorting-rpi-stm32-system.git
+cd conveyor-belt-sorting-rpi-stm32-system
+```
+
+### STM32
+
+Install CMake 3.22+, Ninja, ARM GNU Toolchain, and STM32CubeProgrammer.
+Add `arm-none-eabi-gcc` to `PATH`, then build the firmware.
+
+```sh
+cd STM32Firmware
 cmake --preset Debug
 cmake --build --preset Debug
 ```
 
-Firmware được tạo tại `build-local/Debug/STM32Firmware.elf`.
-Nạp bằng STM32CubeProgrammer và ST-Link qua SWD; xác minh Flash sau khi nạp.
-Cấu hình VS Code và đường dẫn công cụ của từng máy không được commit.
+Flash `build-local/Debug/STM32Firmware.elf` using ST-Link over SWD.
 
-## Raspberry Pi
+### Raspberry Pi
 
-Đọc README trong từng công cụ để tạo môi trường Python và cài đúng
-`requirements.txt`. Một số phụ thuộc camera cần Raspberry Pi OS.
-Chức năng thu ảnh và thử model hiện tách riêng; tích hợp UART, cảm biến và servo
-đang được phát triển.
+Use Raspberry Pi OS with Python 3.11+. From the repository root, install
+camera support and create a virtual environment with system packages.
 
-Pi kết nối UART qua USB CP2102; firmware dùng USART1 ở 115200 baud, 8N1.
+```sh
+cd RaspberryPi
+sudo apt update
+sudo apt install python3-picamera2 python3-venv fonts-dejavu-core
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -r requirements-ncnn.txt -r requirements-dashboard.txt
+cp config.example.toml config.toml
+```
 
+Copy the complete `best_ncnn_model/` export into `RaspberryPi/models/`, including
+its `.param`, matching `.bin`, and `metadata.yaml`. In `config.toml`, set
+`detector.model = "models/best_ncnn_model"` and `dashboard.enabled = true`.
+Match `detector.imgsz` to the export size, usually 640. For PyTorch, install
+`requirements-vision.txt` and set the model path to `models/best.pt`.
 
+Set the serial device, camera, tracker, and counting-line settings for your
+conveyor. Connect CP2102 TX to STM32 PA10, RX to PA9, and share GND.
+UART uses 115200 baud, 8N1, usually through `/dev/ttyUSB0` on the Pi.
+Connect the camera with the Pi powered off and provide suitable external
+power for the motor and servos.
 
+See [Raspberry Pi installation](RaspberryPi/README.md) for configuration paths
+and dependency options.
